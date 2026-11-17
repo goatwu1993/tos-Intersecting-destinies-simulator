@@ -21,14 +21,14 @@ export type State = {
   strategy: Strategy
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 9, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
+export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
   return Number.isFinite(i) ? Math.min(max, Math.max(min, i)) : def
 }
 
-export const LIMITS = { n: [2, 10], m: [1, 12] } as const
+export const LIMITS = { n: [2, 10], m: [1, 12], x: [5, 9] } as const
 
 export function normalize(s: State): State {
   // x is kept as entered even if the board is too small for it; it's capped where used,
@@ -65,7 +65,7 @@ export function read(search: string): State {
   return normalize({
     n,
     m,
-    x: int(q.get('x'), DEFAULT.x, 0, 999),
+    x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
     lines: list('l'),
     empty: list('e'),
     played: list('p').map(Number),
