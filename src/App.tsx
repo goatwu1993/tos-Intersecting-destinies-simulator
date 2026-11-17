@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LANGS, messages, type Lang } from './i18n.ts'
 import { commit, extend, removeRoute, type Node } from './route.ts'
+import type { Expected } from './strategy.ts'
+import type { WorkerInput } from './strategy.worker.ts'
 import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
 import { DEFAULT, LIMITS, normalize, read, write, type State } from './urlState.ts'
 
@@ -82,7 +84,7 @@ const levelLines = (l: number) => l + 4
 
 export default function App() {
   const [state, setState] = useUrlState()
-  const { n, m, played, dest, lang } = state
+  const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
   const x = Math.min(state.x, maxLines(n, m))
   const lines = useMemo(() => new Set(state.lines), [state.lines])
@@ -92,6 +94,32 @@ export default function App() {
   const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [board, lines, played])
   const blocked = useMemo(() => new Set([...empty, ...traces.flatMap((t) => t.straight)]), [empty, traces])
   const result = useMemo(() => analyze(board, lines, blocked), [board, lines, blocked])
+
+  const math = strategy === 'mathematician'
+  // The search can take a second on big boards, so it runs in a worker; changing the inputs
+  // terminates a stale run.
+  const [expected, setExpected] = useState<Expected | null>(null)
+  const [computing, setComputing] = useState(false)
+  useEffect(() => {
+    setExpected(null)
+    if (!math || !result.ok) return setComputing(false)
+    setComputing(true)
+    const worker = new Worker(new URL('./strategy.worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (e: MessageEvent<Expected>) => {
+      setExpected(e.data)
+      setComputing(false)
+    }
+    const input: WorkerInput = {
+      board,
+      lines: [...lines],
+      blocked: [...blocked],
+      played,
+      dest,
+      layoutCount: result.layouts,
+    }
+    worker.postMessage(input)
+    return () => worker.terminate()
+  }, [math, board, lines, blocked, played, dest, result])
 
   const lineEnds = useMemo(() => {
     const s = new Set<string>()
@@ -175,6 +203,12 @@ export default function App() {
 
   const probs = result.ok ? result.prob.map((row) => row[dest]) : []
   const best = probs.length ? Math.max(...probs) : 0
+  const tokens = expected?.ok && !expected.reached ? expected.perStart : []
+  const bestTokens = expected?.ok ? expected.best : 0
+  const isTokenBest = (s: number) => tokens[s] != null && tokens[s]! - bestTokens < 1e-9
+  // until the worker answers, the starts show the gambler's numbers
+  const showTokens = tokens.length > 0
+  const isPick = (s: number) => (showTokens ? isTokenBest(s) : result.ok && probs[s] === best && best > 0)
 
   return (
     <div className="app">
@@ -299,7 +333,7 @@ export default function App() {
               {/* starts */}
               {Array.from({ length: n }, (_, s) => {
                 const p = probs[s]
-                const isBest = result.ok && p === best && best > 0
+                const isBest = isPick(s)
                 return (
                   <g
                     key={s}
@@ -310,7 +344,12 @@ export default function App() {
                     <text x={cx(s)} y={cy(-1) - 26} dy="0.35em">
                       {letter(s)}
                     </text>
-                    {result.ok && (
+                    {showTokens && tokens[s] != null && (
+                      <text className="prob" x={cx(s)} y={cy(-1) - 54}>
+                        {tokens[s]!.toFixed(2)}
+                      </text>
+                    )}
+                    {!showTokens && result.ok && (
                       <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
                         {pct(p)}
                       </text>
@@ -344,6 +383,30 @@ export default function App() {
           </div>
 
         <aside className="panel">
+          <section>
+            <h2>{t.strategy}</h2>
+            <div className="buttons">
+              {(['gambler', 'mathematician'] as const).map((k) => (
+                <button
+                  key={k}
+                  className={strategy === k ? 'on' : ''}
+                  aria-pressed={strategy === k}
+                  onClick={() => setState({ ...state, strategy: k })}
+                >
+                  {t[k]}
+                </button>
+              ))}
+            </div>
+            <p className="meta">{math ? t.mathHint : t.gamblerHint}</p>
+            {computing && <p className="meta">{t.computing}</p>}
+            {expected &&
+              (expected.ok ? (
+                <p className="meta">{expected.reached ? t.reached : t.expectedTokens(expected.best.toFixed(2))}</p>
+              ) : (
+                <p className="error">{t.tooLarge}</p>
+              ))}
+          </section>
+
           <section>
             <h2>{t.presets}</h2>
             <div className="buttons">
@@ -399,7 +462,7 @@ export default function App() {
                 </p>
                 <ol className="bars">
                   {probs.map((p, s) => (
-                    <li key={s} className={p === best && best > 0 ? 'best' : ''}>
+                    <li key={s} className={isPick(s) ? 'best' : ''}>
                       <span className="name">{letter(s)}</span>
                       <span className="bar">
                         <span style={{ width: `${p * 100}%` }} />

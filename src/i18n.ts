@@ -41,6 +41,17 @@ const en = {
   // `count` is the layout count already formatted for display
   summary: (remaining: number, layouts: number, count: string) =>
     `${remaining} hidden line${remaining === 1 ? '' : 's'} · ${count} consistent layout${layouts === 1 ? '' : 's'}`,
+  strategy: 'Strategy',
+  gambler: 'I am a gambler',
+  mathematician: 'I am a mathematician',
+  gamblerHint: 'Greedy: trace the start most likely to reach the destination right now.',
+  mathHint:
+    'Each traced route costs one token. Picks the start that minimizes the expected total tokens to reach the destination, looking ahead over every outcome.',
+  computing: 'Calculating…',
+  expectedTokens: (v: string) => `Expected tokens: ${v}`,
+  tokensIfFirst: 'Tokens if traced next',
+  reached: 'A traced route already reaches the destination.',
+  tooLarge: 'Too many layouts to compute expected tokens; reveal more lines or shrink the board.',
   fullMatrix: 'Full matrix',
   assumptions: 'Assumptions',
   assumptionsBody:
@@ -85,6 +96,16 @@ const zh: Messages = {
   copyLink: '複製連結',
   odds: (dest) => `抵達終點 ${dest} 的機率`,
   summary: (remaining, _layouts, count) => `${remaining} 條未揭示橫線 · ${count} 種符合的排列`,
+  strategy: '策略',
+  gambler: '我是賭鬼',
+  mathematician: '我是數學家',
+  gamblerHint: '貪心：這一步選目前最可能抵達終點的起點。',
+  mathHint: '每追蹤一條路線需花費一個代幣。考慮所有可能的結果，選擇讓抵達終點的期望代幣數最少的起點。',
+  computing: '計算中…',
+  expectedTokens: (v) => `期望代幣數：${v}`,
+  tokensIfFirst: '下一步走此起點的期望代幣數',
+  reached: '已追蹤的路線已抵達終點。',
+  tooLarge: '排列數過多，無法計算期望代幣數；請揭示更多橫線或縮小盤面。',
   fullMatrix: '完整機率矩陣',
   assumptions: '假設',
   assumptionsBody:
