@@ -101,6 +101,13 @@ h1 {
   border-radius: 999px;
   padding: 4px 16px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.counter button {
+  padding: 0 8px;
+  line-height: 1.4;
 }
 
 .board {

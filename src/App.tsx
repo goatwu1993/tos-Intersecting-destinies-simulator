@@ -279,7 +279,21 @@ export default function App() {
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
             <div className="counter">
+              <button
+                aria-label={t.fewerLines}
+                disabled={x <= 0}
+                onClick={() => setState({ ...state, x: x - 1 })}
+              >
+                −
+              </button>
               {t.linesRevealed(lines.size, x)}
+              <button
+                aria-label={t.moreLines}
+                disabled={x >= maxLines(n, m)}
+                onClick={() => setState({ ...state, x: x + 1 })}
+              >
+                +
+              </button>
             </div>
             <svg
               ref={svgRef}
