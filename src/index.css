@@ -434,3 +434,7 @@ button:hover {
     padding: 3px 1px;
   }
 }
+
+.buttons button.on {
+  border-color: var(--cyan);
+}

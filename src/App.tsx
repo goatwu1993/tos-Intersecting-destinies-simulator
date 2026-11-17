@@ -76,6 +76,10 @@ function NumberField(props: {
   )
 }
 
+// Every level is a 6 × 5 board; level l has l + 4 lines (5 … 9).
+const LEVELS = [1, 2, 3, 4, 5]
+const levelLines = (l: number) => l + 4
+
 export default function App() {
   const [state, setState] = useUrlState()
   const { n, m, played, dest, lang } = state
@@ -340,6 +344,23 @@ export default function App() {
           </div>
 
         <aside className="panel">
+          <section>
+            <h2>{t.presets}</h2>
+            <div className="buttons">
+              {LEVELS.map((l) => (
+                <button
+                  key={l}
+                  className={n === 6 && m === 5 && state.x === levelLines(l) ? 'on' : ''}
+                  aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
+                  title={t.level(l, levelLines(l))}
+                  onClick={() => setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section>
             <h2>{t.board}</h2>
             <NumberField
