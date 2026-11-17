@@ -86,9 +86,10 @@ export default function App() {
     return s
   }, [lines])
 
-  // A new line can't touch another line's end or a dot already known to have no line.
+  // A new line can't touch another line's end or a dot marked as having no line. Dots a
+  // traced route merely passes through are allowed: the trace reroutes through the new line.
   const lineConflict = (r: number, c: number) =>
-    [dotKey(r, c), dotKey(r, c + 1)].some((d) => lineEnds.has(d) || blocked.has(d))
+    [dotKey(r, c), dotKey(r, c + 1)].some((d) => lineEnds.has(d) || empty.has(d))
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
@@ -107,14 +108,14 @@ export default function App() {
     if (lineEnds.has(k)) return
     setState({ ...state, empty: [...state.empty, k] })
   }
-  // Clicking a traced start removes its route and what it revealed. Untraced starts are
-  // traced only by dragging a full route, so a click alone never invents one.
-  const removePlayed = (s: number) => {
-    if (played.includes(s)) setState(removeRoute(state, s))
-  }
+  // Clicking an untraced start fast-forwards it to a destination along the revealed lines;
+  // click lines onto its path afterwards and it reroutes. Clicking a traced start removes
+  // its route and what it revealed.
+  const togglePlayed = (s: number) =>
+    setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => setState({ ...state, lines: [], empty: [], played: [] })
 
-  // Dragging from a start draws a route; releasing without moving removes a traced one.
+  // Dragging from a start draws a route; releasing without moving toggles the trace.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
   const nodeAt = (e: React.PointerEvent): Node => {
@@ -135,7 +136,7 @@ export default function App() {
   }
   const onUp = () => {
     if (!drag) return
-    if (drag.length === 1) removePlayed(drag[0][1])
+    if (drag.length === 1) togglePlayed(drag[0][1])
     else setState(commit(state, drag))
     setDrag(null)
   }
@@ -150,8 +151,9 @@ export default function App() {
         <p className="sub">
           Drag from a start down the board to draw a route you saw (sideways steps become lines,
           straight steps mark dots as having no line). Or click between two dots to toggle a line,
-          click a vertical segment to mark that dot as having no line, click a traced start to remove its route (and the lines and
-          no-line dots only it revealed), and click a destination to target it.
+          click a vertical segment to mark that dot as having no line, click a start to fast-forward it to a destination, then click
+          lines onto its path as you reveal them; click a traced start again to remove its route
+          (and the lines and no-line dots only it revealed), and click a destination to target it.
         </p>
       </header>
 
@@ -251,7 +253,7 @@ export default function App() {
                       {on
                         ? 'Remove line'
                         : conflict
-                          ? 'Conflicts with another line or a dot known to have no line'
+                          ? 'Conflicts with another line or a dot marked as having no line'
                           : 'Reveal line'}
                     </title>
                   </rect>
