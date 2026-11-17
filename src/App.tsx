@@ -279,10 +279,10 @@ export default function App() {
                   <rect
                     key={k}
                     className={`hit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
-                    x={cx(c) + 8}
-                    y={cy(r) - 12}
-                    width={GX - 16}
-                    height={24}
+                    x={cx(c) + 10}
+                    y={cy(r) - 18}
+                    width={GX - 20}
+                    height={36}
                     rx={6}
                     onClick={() => toggleLine(r, c)}
                   >
