@@ -5,7 +5,7 @@
 // average to land on the target destination follows from a game-tree search: pick a start,
 // split the layouts by the path it revealed, and recurse on the groups that missed.
 
-import { rowOptions, touchedColumns, trace, type Board } from './solver.ts'
+import { rowOptions, trace, type Board } from './solver.ts'
 
 export const MAX_LAYOUTS = 200_000
 
@@ -56,19 +56,17 @@ export function expectedTokens(
     if (used + capacity[r] < remaining) return
     for (const o of rows[r]) {
       if (used + o.k > remaining) continue
-      // a line moves both its columns, so the columns this row maps elsewhere are touched
-      let t = touched
-      for (let c = 0; c < n; c++) if (o.map[c] !== c) t |= 1 << c
       rec(
         r + 1,
         used + o.k,
-        t,
+        touched | o.moved,
         cur.map((c) => o.map[c]),
         sg.map((v, s) => v * 3 + (o.map[cur[s]] - cur[s] + 1)),
       )
     }
   }
-  rec(0, 0, touchedColumns(lines) & all, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
+  // revealed lines are in every option of their row, so they mark their columns as they go
+  rec(0, 0, 0, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
 
   // set: layouts still consistent; mask: starts already traced.
   const value = (set: number[], mask: number, s: number, unplayed: number): number => {

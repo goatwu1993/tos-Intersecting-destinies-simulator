@@ -123,17 +123,19 @@ export function read(search: string): Loaded {
   })
   const d = derive(s)
   if (!d) {
-    // a link whose routes can't happen keeps its settings but loads an empty board
-    const empty = derive({ ...s, lines: [], played: [] })!
-    return { ...empty, dropped: true }
+    // A link whose routes can't happen keeps its settings but loads an empty board. Some
+    // shapes can't be played even empty (every column needs a line, e.g. 5 columns on one
+    // row), so those load the default board.
+    const fallback = derive({ ...s, lines: [], played: [] }) ?? derive({ ...DEFAULT, lang: s.lang, strategy: s.strategy })!
+    return { ...fallback, dropped: true }
   }
   const { state } = d
   // a number param that was out of range (or not a number) and so was clamped
   const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)
   const dropped =
     list('e').length > 0 ||
-    state.lines.length < new Set(lines).size ||
-    state.played.length < new Set(played).size ||
+    state.lines.length < lines.length ||
+    state.played.length < played.length ||
     clamped('n', state.n) ||
     clamped('m', state.m) ||
     clamped('x', state.x) ||

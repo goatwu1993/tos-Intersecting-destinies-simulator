@@ -48,12 +48,15 @@ const rewrite = (s: State) => {
 // is about the board, so it stays until the board or routes change.
 function useUrlState() {
   const [saved, setSaved] = useState(load)
+  // counts back/forward loads, so anything tied to the old state can reset
+  const [loads, setLoads] = useState(0)
   useEffect(() => {
     rewrite(saved.state)
     const onPop = () => {
       const next = load()
       rewrite(next.state)
       setSaved(next)
+      setLoads((v) => v + 1)
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -72,7 +75,7 @@ function useUrlState() {
     setSaved({ ...d, notice: same ? saved.notice : null })
     return true
   }
-  return { ...saved, update, setNotice }
+  return { ...saved, loads, update, setNotice }
 }
 
 // Edits are local until blur or Enter, so typing through intermediate values
@@ -118,7 +121,7 @@ const LEVELS = [1, 2, 3, 4, 5]
 const levelLines = (l: number) => l + 4
 
 export default function App() {
-  const { state, known, notice, update: setState, setNotice } = useUrlState()
+  const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
   const { board, lines, ends: lineEnds, traces, blocked, result } = known
@@ -207,21 +210,23 @@ export default function App() {
     }
     setClick(next)
   }
-  // r is the row of the segment's upper node (-1 = below the start post)
-  const onSegment = (r: number, c: number) => editDraft(clickSegment(click, r, c))
-  const onGap = (r: number, c: number) => click && editDraft(clickLine(click, r, c))
+  // What clicking a piece would do to the draft: nothing (not clickable), undo part of it,
+  // or extend / start it. Only pieces that change the draft are clickable.
+  const effect = (next: Draft | null) =>
+    next === click ? null : !next || (click && next.path.length < click.path.length) ? 'undo' : 'add'
+  const drafting = click !== null
   useEffect(() => {
-    if (!click) return
+    if (!drafting) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [click])
-  // A draft is drawn on one board shape; a new shape (resize, back/forward) drops it.
+  }, [drafting])
+  // A draft is drawn against one board; a new shape (resize) or a back/forward load drops it.
   useEffect(() => {
     setClick(null)
     setDrag(null)
     pointer.current = null
-  }, [n, m])
+  }, [n, m, loads])
 
   const onStartDown = (e: React.PointerEvent, s: number) => {
     // primary button / first finger only, one drag at a time
@@ -373,41 +378,46 @@ export default function App() {
               {/* clickable vertical segments between nodes: start or extend a route */}
               {Array.from({ length: m + 1 }, (_, i) =>
                 Array.from({ length: n }, (_, c) => {
+                  // r is the row of the segment's upper node (-1 = below the start post)
                   const r = i - 1
-                  const k = key(r, c)
+                  const next = clickSegment(click, r, c)
+                  const does = effect(next)
+                  if (!does) return null
                   return (
                     <rect
-                      key={k}
+                      key={key(r, c)}
                       className="hit vhit"
                       x={cx(c) - 10}
                       y={cy(r) + 10}
                       width={20}
                       height={GY - 20}
                       rx={6}
-                      onClick={() => onSegment(r, c)}
+                      onClick={() => editDraft(next)}
                     >
-                      <title>{t.stepDown}</title>
+                      <title>{does === 'undo' ? t.undoStep : click ? t.stepStraight : t.startRoute}</title>
                     </rect>
                   )
                 }),
               )}
 
-              {/* clickable gaps between dots, while building a route */}
+              {/* clickable gaps between dots, while building a route: lines it can take or undo */}
               {click && Array.from({ length: m }, (_, r) =>
                 Array.from({ length: n - 1 }, (_, c) => {
-                  const k = key(r, c)
+                  const next = clickLine(click, r, c)
+                  const does = effect(next)
+                  if (!does) return null
                   return (
                     <rect
-                      key={k}
+                      key={key(r, c)}
                       className="hit"
                       x={cx(c) + 10}
                       y={cy(r) - 18}
                       width={GX - 20}
                       height={36}
                       rx={6}
-                      onClick={() => onGap(r, c)}
+                      onClick={() => editDraft(next)}
                     >
-                      <title>{t.stepAcross}</title>
+                      <title>{does === 'undo' ? t.undoStep : t.stepAcross}</title>
                     </rect>
                   )
                 }),

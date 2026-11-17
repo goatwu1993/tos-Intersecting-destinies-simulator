@@ -6,26 +6,26 @@ export type Node = [number, number]
 
 const same = (a: Node, b: Node) => a[0] === b[0] && a[1] === b[1]
 
-// Extend a route toward the node under the pointer, one legal step at a time:
-// down one row, or (on a dot row, if the last step wasn't sideways) one column across.
-// Pointing back at an earlier node rewinds the route to it.
+const sideways = (a: Node, b: Node) => a[0] === b[0]
+
+// Extend a dragged route (from a start, top-down) toward the node under the pointer, with the
+// same steps as a clicked one: down one row, or across a line on a dot row, which brings the
+// step past it. Pointing back at an earlier node rewinds the route to it, keeping the step
+// past a line (a route can't end on a line).
 export function extend(path: Node[], target: Node, m: number): Node[] {
   const idx = path.findIndex((p) => same(p, target))
-  if (idx >= 0) return path.slice(0, idx + 1)
-  const out = [...path]
+  if (idx >= 0) return path.slice(0, idx > 0 && sideways(path[idx - 1], path[idx]) ? idx + 2 : idx + 1)
+  let d: Draft = { path, origin: path[0] }
   for (let i = 0; i < 64; i++) {
-    const last = out[out.length - 1]
-    const [r, c] = last
-    if (same(last, target)) break
-    const prev = out[out.length - 2]
-    const cameSideways = prev !== undefined && prev[0] === r
-    if (target[0] === r && r >= 0 && r < m && !cameSideways && target[1] !== c) {
-      out.push([r, c + Math.sign(target[1] - c)])
-    } else if (target[0] > r && r < m) {
-      out.push([r + 1, c])
-    } else break
+    const [r, c] = d.path[d.path.length - 1]
+    if (r === target[0] && c === target[1]) break
+    let next: Draft | null = d
+    if (target[0] === r && r >= 0 && r < m) next = clickLine(d, r, target[1] > c ? c : c - 1)
+    else if (target[0] > r && r < m) next = clickSegment(d, r, c)
+    if (!next || next === d) break
+    d = next
   }
-  return out
+  return d.path
 }
 
 // A route built by clicking pieces: a path (top to bottom) grown from the first vertical
@@ -47,18 +47,18 @@ function undo(d: Draft, i: number): Draft | null {
   const { path } = d
   const o = pieceAt(path, (a) => same(a, d.origin))
   if (i === o) return null
-  const sideways = (a: Node, b: Node) => a[0] === b[0]
   if (i > o) return { ...d, path: path.slice(0, sideways(path[i - 1], path[i]) ? i : i + 1) }
   return { ...d, path: path.slice(sideways(path[i + 1], path[i + 2]) ? i + 2 : i + 1) }
 }
 
 export const complete = (d: Draft, m: number) => d.path[0][0] === -1 && d.path[d.path.length - 1][0] === m
 
-// Click the vertical segment from (r, c) down to (r + 1, c), r = -1 … m - 1. It undoes a
-// segment in the draft, extends an end straight along its column, or starts a new draft.
+// Click the vertical segment from (r, c) down to (r + 1, c), r = -1 … m - 1. With no draft
+// it starts one; otherwise it undoes a segment in the draft or extends an end straight along
+// its column. Segments that can't join either end are ignored (the draft is returned as is),
+// so a stray click doesn't lose the draft.
 export function clickSegment(d: Draft | null, r: number, c: number): Draft | null {
-  const fresh = { path: [[r, c], [r + 1, c]] as Node[], origin: [r, c] as Node }
-  if (!d) return fresh
+  if (!d) return { path: [[r, c], [r + 1, c]], origin: [r, c] }
   const { path } = d
   const i = pieceAt(path, (a, b) => same(a, [r, c]) && same(b, [r + 1, c]))
   if (i >= 0) return undo(d, i)
@@ -66,7 +66,7 @@ export function clickSegment(d: Draft | null, r: number, c: number): Draft | nul
   if (c === cb && r >= rb) return { ...d, path: [...path, ...column(rb + 1, r + 1, c)] }
   const [rt, ct] = path[0]
   if (c === ct && r + 1 <= rt) return { ...d, path: [...column(r, rt - 1, c), ...path] }
-  return fresh
+  return d
 }
 
 // Click the line on dot row r joining columns c and c + 1. It undoes a line in the draft, or
@@ -78,13 +78,13 @@ export function clickLine(d: Draft, r: number, c: number): Draft | null {
   const i = pieceAt(path, (a, b) => a[0] === r && b[0] === r && Math.min(a[1], b[1]) === c)
   if (i >= 0) return undo(d, i)
   const other = (col: number) => (col === c ? c + 1 : c)
-  const touches = (col: number) => col === c || col === c + 1
+  const joins = (col: number) => col === c || col === c + 1
   const [rb, cb] = path[path.length - 1]
-  if (touches(cb) && r >= rb) {
+  if (joins(cb) && r >= rb) {
     return { ...d, path: [...path, ...column(rb + 1, r, cb), [r, other(cb)], [r + 1, other(cb)]] }
   }
   const [rt, ct] = path[0]
-  if (touches(ct) && r <= rt) {
+  if (joins(ct) && r <= rt) {
     return { ...d, path: [[r - 1, other(ct)], [r, other(ct)], ...column(r, rt - 1, ct), ...path] }
   }
   return d

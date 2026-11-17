@@ -57,8 +57,9 @@ export function trace(board: Board, lines: Set<string>, start: number): Trace {
   return { end: c, points, straight, lines: used }
 }
 
-// Each option for a row: how many unknown lines it adds and the resulting column mapping.
-export type RowOption = { k: number; map: number[] }
+// Each option for a row: how many unknown lines it adds, the resulting column mapping, and
+// (bit c) the columns a line in the row touches, revealed or not.
+export type RowOption = { k: number; map: number[]; moved: number }
 
 export function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<string>): RowOption[] {
   const used = new Array<boolean>(n).fill(false)
@@ -80,11 +81,13 @@ export function rowOptions(n: number, r: number, lines: Set<string>, blocked: Se
   const chosen: number[] = []
   const emit = () => {
     const map = Array.from({ length: n }, (_, i) => i)
+    let moved = 0
     for (const c of [...fixed, ...chosen]) {
       map[c] = c + 1
       map[c + 1] = c
+      moved |= 3 << c
     }
-    out.push({ k: chosen.length, map })
+    out.push({ k: chosen.length, map, moved })
   }
   // enumerate subsets of free edges with no shared endpoint
   const rec = (i: number, last: number) => {
@@ -129,14 +132,13 @@ export function analyze(board: Board, lines: Set<string>, blocked: Set<string>):
 
   // Every column needs a line. By inclusion–exclusion over the columns no revealed line
   // touches yet: valid = Σ over subsets S of them, (−1)^|S| × layouts touching none of S,
-  // where a layout avoids S's columns by treating all their dots as blocked. Counts stay
-  // below 2^53 at these board sizes, so the alternating sum is exact.
+  // i.e. using only row options that touch no column in S. Counts stay below 2^53 at these
+  // board sizes, so the alternating sum is exact.
+  const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
   const free = ~touchedColumns(lines) & ((1 << n) - 1)
   const final = new Float64Array(n * n)
   for (let S = free; ; S = (S - 1) & free) {
-    const avoid = new Set(blocked)
-    for (let c = 0; c < n; c++) if (S & (1 << c)) for (let r = 0; r < m; r++) avoid.add(key(r, c))
-    const counts = count(board, lines, avoid, remaining)
+    const counts = count(n, rows.map((opts) => opts.filter((o) => !(o.moved & S))), remaining)
     const sign = popcount(S) % 2 ? -1 : 1
     for (let i = 0; i < n * n; i++) final[i] += sign * counts[i]
     if (S === 0) break
@@ -156,12 +158,9 @@ const popcount = (v: number) => {
   return k
 }
 
-// counts[start * n + end]: layouts of the `remaining` hidden lines (no column rule) that take
-// start to end.
-function count(board: Board, lines: Set<string>, blocked: Set<string>, remaining: number): Float64Array {
-  const { n, m } = board
-  const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
-
+// counts[start * n + end]: layouts of the `remaining` hidden lines built from the given row
+// options (no column rule) that take start to end.
+function count(n: number, rows: RowOption[][], remaining: number): Float64Array {
   // dp[used][start * n + pos] = number of partial layouts using `used` hidden lines
   // that take `start` to column `pos`; all starts advance together, row by row.
   const R = remaining
