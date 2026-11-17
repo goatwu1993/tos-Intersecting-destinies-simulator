@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { LANGS, messages, type Lang } from './i18n.ts'
 import { commit, extend, removeRoute, type Node } from './route.ts'
 import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
 import { DEFAULT, LIMITS, normalize, read, write, type State } from './urlState.ts'
@@ -17,8 +18,8 @@ const pct = (p: number) => {
 }
 
 // Counts above 2^53 aren't exact in floating point, so show them as approximate.
-const formatCount = (v: number) => {
-  if (v <= Number.MAX_SAFE_INTEGER) return v.toLocaleString()
+const formatCount = (v: number, lang: Lang) => {
+  if (v <= Number.MAX_SAFE_INTEGER) return v.toLocaleString(lang)
   const [mant, exp] = v.toExponential(2).split('e')
   return `≈ ${mant} × 10^${Number(exp)}`
 }
@@ -77,7 +78,8 @@ function NumberField(props: {
 
 export default function App() {
   const [state, setState] = useUrlState()
-  const { n, m, played, dest } = state
+  const { n, m, played, dest, lang } = state
+  const t = messages[lang]
   const x = Math.min(state.x, maxLines(n, m))
   const lines = useMemo(() => new Set(state.lines), [state.lines])
   const empty = useMemo(() => new Set(state.empty), [state.empty])
@@ -162,29 +164,43 @@ export default function App() {
     endDrag()
   }
 
+  useEffect(() => {
+    document.documentElement.lang = lang
+    document.title = t.title
+  }, [lang, t])
+
   const probs = result.ok ? result.prob.map((row) => row[dest]) : []
   const best = probs.length ? Math.max(...probs) : 0
 
   return (
     <div className="app">
       <header>
-        <h1>Intersecting Destinies Simulator</h1>
-        <p className="sub">
-          Drag from a start down the board to draw a route you saw (sideways steps become lines,
-          straight steps mark dots as having no line). Or click between two dots to toggle a line,
-          click a vertical segment to mark that dot as having no line, click a start to fast-forward it to a destination, then click
-          lines onto its path as you reveal them; click a traced start again to remove its route
-          (and the lines and no-line dots only it revealed), and click a destination to target it.
-        </p>
+        <div className="title-row">
+          <h1>{t.title}</h1>
+          <div className="langs" role="group" aria-label={t.language}>
+            {LANGS.map((l) => (
+              <button
+                key={l}
+                lang={l}
+                className={l === lang ? 'on' : ''}
+                aria-pressed={l === lang}
+                onClick={() => setState({ ...state, lang: l })}
+              >
+                {messages[l].langName}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="sub">{t.intro}</p>
       </header>
 
       <div className="layout">
         <div className="board-wrap">
           <div className="board-bar">
-            <button onClick={resetBoard}>Reset</button>
+            <button onClick={resetBoard}>{t.reset}</button>
           </div>
           <div className="counter">
-            Lines revealed: {lines.size} / {x}
+            {t.linesRevealed(lines.size, x)}
           </div>
           <svg
             ref={svgRef}
@@ -247,7 +263,7 @@ export default function App() {
                     rx={6}
                     onClick={() => toggleEmpty(r, c)}
                   >
-                    <title>{on ? 'Unmark (unknown)' : conflict ? 'A line ends here' : 'Mark: no line at this dot'}</title>
+                    <title>{on ? t.unmark : conflict ? t.lineEndsHere : t.markEmpty}</title>
                   </rect>
                 )
               }),
@@ -270,13 +286,7 @@ export default function App() {
                     rx={6}
                     onClick={() => toggleLine(r, c)}
                   >
-                    <title>
-                      {on
-                        ? 'Remove line'
-                        : conflict
-                          ? 'Conflicts with another line or a dot marked as having no line'
-                          : 'Reveal line'}
-                    </title>
+                    <title>{on ? t.removeLine : conflict ? t.lineConflict : t.revealLine}</title>
                   </rect>
                 )
               }),
@@ -325,41 +335,40 @@ export default function App() {
 
         <aside className="panel">
           <section>
-            <h2>Board</h2>
+            <h2>{t.board}</h2>
             <NumberField
-              label="Columns (n)"
+              label={t.columns}
               min={LIMITS.n[0]}
               max={LIMITS.n[1]}
               value={n}
               onCommit={(v) => setState({ ...state, n: v })}
             />
             <NumberField
-              label="Dot rows (m)"
+              label={t.dotRows}
               min={LIMITS.m[0]}
               max={LIMITS.m[1]}
               value={m}
               onCommit={(v) => setState({ ...state, m: v })}
             />
             <NumberField
-              label="Total lines (x)"
+              label={t.totalLines}
               min={0}
               max={maxLines(n, m)}
               value={x}
               onCommit={(v) => setState({ ...state, x: v })}
             />
             <div className="buttons">
-              <button onClick={() => setState(DEFAULT)}>Reset all</button>
-              <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>Copy link</button>
+              <button onClick={() => setState({ ...DEFAULT, lang })}>{t.resetAll}</button>
+              <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>{t.copyLink}</button>
             </div>
           </section>
 
           <section>
-            <h2>Odds to reach destination {dest + 1}</h2>
+            <h2>{t.odds(dest + 1)}</h2>
             {result.ok ? (
               <>
                 <p className="meta">
-                  {result.remaining} hidden line{result.remaining === 1 ? '' : 's'} ·{' '}
-                  {formatCount(result.layouts)} consistent layout{result.layouts === 1 ? '' : 's'}
+                  {t.summary(result.remaining, result.layouts, formatCount(result.layouts, lang))}
                 </p>
                 <ol className="bars">
                   {probs.map((p, s) => (
@@ -374,13 +383,15 @@ export default function App() {
                 </ol>
               </>
             ) : (
-              <p className="error">{result.error}</p>
+              <p className="error">
+                {result.error === 'tooManyLines' ? t.tooManyLines(lines.size, x) : t.noLayout}
+              </p>
             )}
           </section>
 
           {result.ok && (
             <section>
-              <h2>Full matrix</h2>
+              <h2>{t.fullMatrix}</h2>
               <table className="matrix">
                 <thead>
                   <tr>
@@ -413,12 +424,8 @@ export default function App() {
           )}
 
           <section className="notes">
-            <h2>Assumptions</h2>
-            <p>
-              Hidden lines are equally likely to be any layout consistent with what you know: the
-              revealed lines, and every dot known to have no line (shown hollow) — either marked by
-              you or passed straight through by a traced route. Lines join adjacent columns on the same row and never share a dot.
-            </p>
+            <h2>{t.assumptions}</h2>
+            <p>{t.assumptionsBody}</p>
           </section>
         </aside>
       </div>

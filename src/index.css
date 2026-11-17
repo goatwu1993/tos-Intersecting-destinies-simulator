@@ -18,7 +18,7 @@ body {
   margin: 0;
   background: radial-gradient(ellipse at top, #1b2433, var(--bg) 60%);
   color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   min-height: 100vh;
 }
 
@@ -31,6 +31,38 @@ body {
 h1 {
   margin: 0;
   font-size: 22px;
+}
+
+.title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.langs {
+  display: flex;
+}
+.langs button {
+  border-radius: 0;
+  padding: 3px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.langs button + button {
+  margin-left: -1px;
+}
+.langs button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.langs button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+.langs button.on {
+  color: var(--text);
+  border-color: var(--cyan);
+  position: relative;
 }
 
 .sub {
