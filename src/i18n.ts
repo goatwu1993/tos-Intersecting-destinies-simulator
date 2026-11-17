@@ -12,6 +12,7 @@ const en = {
   langName: 'English',
   title: 'Intersecting Destinies Simulator',
   rules: [
+    'Every route from a start to its destination changes lane at least once, so every column has at least one line and a route that goes straight down is invalid.',
     'Drag from a start down the board to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
     'Click between two dots to toggle a line.',
     'Click a vertical segment to mark that dot as having no line.',
@@ -73,6 +74,7 @@ const zh: Messages = {
   langName: '繁體中文',
   title: '路徑模擬器',
   rules: [
+    '每條從起點到終點的路線至少會換道一次，因此每一欄至少有一條橫線，一路直行的路線不成立。',
     '從起點往下拖曳，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
     '點擊兩點之間可新增或移除橫線。',
     '點擊直線段可將該點標記為沒有橫線。',

@@ -35,10 +35,13 @@ const touches = (line: string, dot: string) => {
 
 // Apply a drawn route to the board: sideways steps become revealed lines, and the route
 // is taken as truth, so anything it contradicts is dropped. A route that reaches the
-// destination row marks its start as traced, which already implies the dots it passes
+// destination row (with at least one sideways step) marks its start as traced, which already implies the dots it passes
 // straight through (and lets lines be clicked onto it, like a clicked trace). A partial
 // route can't be traced, so its straight dots are stored as marked-empty instead.
 export function commit(state: State, path: Node[]): State {
+  // every route changes lane at least once: a complete straight route is impossible
+  const complete0 = path[path.length - 1][0] === state.m
+  if (complete0 && path.every((p, i) => i === 0 || p[1] === path[i - 1][1])) return state
   let lines = [...state.lines]
   const empty = new Set(state.empty)
   const straight: string[] = []

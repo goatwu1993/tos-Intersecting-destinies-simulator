@@ -3,6 +3,7 @@
 // - A horizontal line sits on dot row r and joins column c with column c+1; key "r.c".
 // - Two lines never share an endpoint (dot).
 // - x lines exist in total; some are revealed, the rest are unknown.
+// - Every route changes lane at least once, i.e. every column has a line touching it.
 //
 // Unknown lines are assumed to be placed uniformly at random among all layouts
 // consistent with what is known: the revealed lines, plus every dot known to
@@ -51,7 +52,8 @@ export function trace(board: Board, lines: Set<string>, start: number): Trace {
 }
 
 // Each option for a row: how many unknown lines it adds and the resulting column mapping.
-export type RowOption = { k: number; map: number[] }
+// cover: bitmask of the columns this row's lines (revealed and chosen) touch.
+export type RowOption = { k: number; map: number[]; cover: number }
 
 export function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<string>): RowOption[] {
   const used = new Array<boolean>(n).fill(false)
@@ -73,11 +75,13 @@ export function rowOptions(n: number, r: number, lines: Set<string>, blocked: Se
   const chosen: number[] = []
   const emit = () => {
     const map = Array.from({ length: n }, (_, i) => i)
+    let cover = 0
     for (const c of [...fixed, ...chosen]) {
       map[c] = c + 1
       map[c + 1] = c
+      cover |= 3 << c
     }
-    out.push({ k: chosen.length, map })
+    out.push({ k: chosen.length, map, cover })
   }
   // enumerate subsets of free edges with no shared endpoint
   const rec = (i: number, last: number) => {
@@ -112,28 +116,36 @@ export function analyze(board: Board, lines: Set<string>, blocked: Set<string>):
 
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
 
-  // dp[used][start * n + pos] = number of partial layouts using `used` hidden lines
-  // that take `start` to column `pos`; all starts advance together, row by row.
+  // dp[used].get(covered)[start * n + pos] = number of partial layouts using `used` hidden
+  // lines, touching the columns in the `covered` bitmask, that take `start` to column `pos`;
+  // all starts advance together, row by row.
   const R = remaining
-  let dp = Array.from({ length: R + 1 }, () => new Float64Array(n * n))
-  for (let s = 0; s < n; s++) dp[0][s * n + s] = 1
+  const fresh = () => new Float64Array(n * n)
+  let dp = Array.from({ length: R + 1 }, () => new Map<number, Float64Array>())
+  const init = fresh()
+  for (let s = 0; s < n; s++) init[s * n + s] = 1
+  dp[0].set(0, init)
   for (const opts of rows) {
-    const next = Array.from({ length: R + 1 }, () => new Float64Array(n * n))
+    const next = Array.from({ length: R + 1 }, () => new Map<number, Float64Array>())
     for (let u = 0; u <= R; u++) {
-      const cur = dp[u]
-      if (!cur.some(Boolean)) continue
-      for (const o of opts) {
-        if (u + o.k > R) continue
-        const out = next[u + o.k]
-        for (let s = 0; s < n; s++) {
-          for (let pos = 0; pos < n; pos++) out[s * n + o.map[pos]] += cur[s * n + pos]
+      for (const [cov, cur] of dp[u]) {
+        for (const o of opts) {
+          if (u + o.k > R) continue
+          const target = next[u + o.k]
+          const nc = cov | o.cover
+          let out = target.get(nc)
+          if (!out) target.set(nc, (out = fresh()))
+          for (let s = 0; s < n; s++) {
+            for (let pos = 0; pos < n; pos++) out[s * n + o.map[pos]] += cur[s * n + pos]
+          }
         }
       }
     }
     dp = next
   }
 
-  const final = dp[R]
+  // only layouts where every column has a line count
+  const final = dp[R].get((1 << n) - 1) ?? fresh()
   // every layout sends start 0 somewhere, so its row sums to the layout count
   let layouts = 0
   for (let d = 0; d < n; d++) layouts += final[d]
