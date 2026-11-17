@@ -4,7 +4,7 @@
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
-import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
+import { analyze, key, maxLines, parseKey, trace, type Analysis, type Board, type Trace } from './solver.ts'
 
 export type Strategy = 'gambler' | 'mathematician'
 
@@ -60,31 +60,61 @@ export function normalize(s: State): State {
   }
 }
 
-// Whether the traced routes are possible: some layout of the x lines agrees with them.
-export function possible(s: State): boolean {
-  const board = { n: s.n, m: s.m, x: Math.min(s.x, maxLines(s.n, s.m)) }
-  const lines = new Set(s.lines)
-  const blocked = new Set(s.played.flatMap((p) => trace(board, lines, p).straight))
-  return analyze(board, lines, blocked).ok
+// What a state's traced routes prove, and the odds they leave for the hidden lines.
+export type Known = {
+  board: Board // x capped to what the board can hold
+  lines: Set<string>
+  traces: Trace[]
+  blocked: Set<string> // dots a route passes straight through, so they have no line
+  result: Extract<Analysis, { ok: true }>
 }
 
-export function read(search: string): State {
+// null when the routes are impossible: no layout of the x lines agrees with them.
+export function derive(s: State): Known | null {
+  const board = { n: s.n, m: s.m, x: Math.min(s.x, maxLines(s.n, s.m)) }
+  const lines = new Set(s.lines)
+  const traces = s.played.map((p) => trace(board, lines, p))
+  const blocked = new Set(traces.flatMap((t) => t.straight))
+  const result = analyze(board, lines, blocked)
+  return result.ok ? { board, lines, traces, blocked, result } : null
+}
+
+// Whether two states have the same board and routes, so the same Known.
+export const sameBoard = (a: State, b: State) =>
+  a.n === b.n &&
+  a.m === b.m &&
+  a.x === b.x &&
+  a.lines.join() === b.lines.join() &&
+  a.played.join() === b.played.join()
+
+// `adjusted` is set when the link held something that isn't kept: lines no route crosses,
+// the retired `e` (no-line dots) param, out-of-range starts, or routes that are impossible
+// (which load as an empty board).
+export type Loaded = { state: State; known: Known; adjusted: boolean }
+
+export function read(search: string): Loaded {
   const q = new URLSearchParams(search)
   const list = (k: string) => (q.get(k) ?? '').split(',').filter(Boolean)
   const n = int(q.get('n'), DEFAULT.n, ...LIMITS.n)
   const m = int(q.get('m'), DEFAULT.m, ...LIMITS.m)
+  const lines = list('l')
+  const played = list('p').map(Number)
   const s = normalize({
     n,
     m,
     x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
-    lines: list('l'),
-    played: list('p').map(Number),
+    lines,
+    played,
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
+  const known = derive(s)
+  const dropped = q.has('e') || s.lines.length < lines.length || s.played.length < played.length
+  if (known) return { state: s, known, adjusted: dropped }
   // a link whose routes can't happen keeps its settings but loads an empty board
-  return possible(s) ? s : { ...s, lines: [], played: [] }
+  const empty = { ...s, lines: [], played: [] }
+  return { state: empty, known: derive(empty)!, adjusted: true }
 }
 
 export function write(s: State): string {

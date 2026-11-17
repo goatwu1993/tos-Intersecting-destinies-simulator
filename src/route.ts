@@ -1,4 +1,4 @@
-import { key, parseKey } from './solver.ts'
+import { key, parseKey, trace } from './solver.ts'
 import type { State } from './urlState.ts'
 
 // A drawn route is a list of grid nodes [row, col]; row -1 is the start post, row m the destination post.
@@ -34,9 +34,11 @@ const touches = (line: string, dot: string) => {
 }
 
 // Apply a route drawn down to the destination row: sideways steps become revealed lines,
-// and the route is taken as truth, so anything it contradicts is dropped. Its start is
-// marked as traced, which already implies the dots it passes straight through.
-export function commit(state: State, path: Node[]): State {
+// and the route replaces what was known along it, including an earlier route from the same
+// start. Its start is marked as traced, which already implies the dots it passes straight
+// through. Routes traced from other starts were seen too: if the new route would change any
+// of them it contradicts them, and null is returned instead.
+export function commit(state: State, path: Node[]): State | null {
   let lines = [...state.lines]
   for (let i = 0; i < path.length; i++) {
     const [r, c] = path[i]
@@ -55,6 +57,11 @@ export function commit(state: State, path: Node[]): State {
     }
   }
   const start = path[0][1]
+  const others = state.played.filter((p) => p !== start)
+  const before = new Set(state.lines)
+  const after = new Set(lines)
+  const route = (ls: Set<string>, p: number) => trace(state, ls, p).points.join(' ')
+  if (others.some((p) => route(before, p) !== route(after, p))) return null
   const played = state.played.includes(start) ? state.played : [...state.played, start]
   return { ...state, lines, played }
 }

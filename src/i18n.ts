@@ -28,6 +28,8 @@ const en = {
   stepDown: 'Route: go straight down',
   stepAcross: 'Route: take this line',
   impossible: 'Not saved: no layout of the lines agrees with that.',
+  contradicts: 'Not saved: this route contradicts a route already traced.',
+  adjusted: 'This link had lines no traced route crosses, no-line dots, or impossible routes; they were removed.',
   board: 'Board',
   presets: 'Presets',
   level: (l: number, x: number) => `Level ${l} · ${x} lines`,
@@ -58,8 +60,6 @@ const en = {
     'revealed lines, and every dot known to have no line (shown hollow) because a traced ' +
     'route passes straight through it. Lines join adjacent columns on the same ' +
     'row and never share a dot.',
-  tooManyLines: (revealed: number, x: number) => `${revealed} lines revealed but only ${x} exist.`,
-  noLayout: 'No layout of the hidden lines is consistent with this board.',
 }
 
 export type Messages = typeof en
@@ -84,6 +84,8 @@ const zh: Messages = {
   stepDown: '路線：直行向下',
   stepAcross: '路線：走這條橫線',
   impossible: '未儲存：沒有任何橫線排列符合此狀態。',
+  contradicts: '未儲存：此路線與已追蹤的路線矛盾。',
+  adjusted: '此連結含有沒有路線經過的橫線、無橫線點或不可能的路線，已將其移除。',
   board: '盤面',
   presets: '預設關卡',
   level: (l, x) => `關卡 ${l} · ${x} 條橫線`,
@@ -110,8 +112,6 @@ const zh: Messages = {
     '未揭示的橫線會以相同機率出現在任何與已知資訊相符的排列中：已知資訊包含已揭示的橫線，' +
     '以及所有確定沒有橫線的點（以空心顯示）——即被已追蹤路線直行通過的點。' +
     '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點。',
-  tooManyLines: (revealed, x) => `已揭示 ${revealed} 條橫線，但總共只有 ${x} 條。`,
-  noLayout: '未揭示的橫線沒有任何排列能符合目前的盤面。',
 }
 
 export const messages: Record<Lang, Messages> = { 'zh-TW': zh, 'en-US': en }

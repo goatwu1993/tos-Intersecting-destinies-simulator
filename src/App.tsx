@@ -3,8 +3,8 @@ import { LANGS, messages, type Lang } from './i18n.ts'
 import { commit, extend, removeRoute, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
-import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
-import { DEFAULT, LIMITS, normalize, possible, read, write, type State } from './urlState.ts'
+import { key, parseKey } from './solver.ts'
+import { DEFAULT, LIMITS, derive, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
 const GY = 56
@@ -26,23 +26,42 @@ const formatCount = (v: number, lang: Lang) => {
   return `≈ ${mant} × 10^${Number(exp)}`
 }
 
+// Why the board isn't what was asked for: an edit no layout agrees with, a route that
+// contradicts one already traced, or a link that was cleaned up on load.
+type Notice = 'impossible' | 'contradicts' | 'adjusted'
+type Saved = { state: State; known: Known; notice: Notice | null }
+
+const load = (): Saved => {
+  const { state, known, adjusted } = read(window.location.search)
+  // rewrite a cleaned-up link so reloading or copying it doesn't pass the bad state on
+  if (adjusted) window.history.replaceState(null, '', write(state))
+  return { state, known, notice: adjusted ? 'adjusted' : null }
+}
+
 // Only possible states are saved: an update whose routes no layout agrees with is refused
-// (returns false) and the board and URL stay as they were.
-function useUrlState(): [State, (s: State) => boolean] {
-  const [state, setState] = useState(() => read(window.location.search))
+// (returns false), the board and URL stay as they were, and the notice says why. Any
+// accepted update clears the notice.
+function useUrlState() {
+  const [saved, setSaved] = useState(load)
   useEffect(() => {
-    const onPop = () => setState(read(window.location.search))
+    const onPop = () => setSaved(load())
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  const setNotice = (notice: Notice | null) => setSaved((v) => (v.notice === notice ? v : { ...v, notice }))
   const update = (s: State) => {
     const next = normalize(s)
-    if (!possible(next)) return false
+    // edits that leave the board and routes alone (language, destination…) reuse the odds
+    const known = sameBoard(next, saved.state) ? saved.known : derive(next)
+    if (!known) {
+      setNotice('impossible')
+      return false
+    }
     window.history.replaceState(null, '', write(next))
-    setState(next)
+    setSaved({ state: next, known, notice: null })
     return true
   }
-  return [state, update]
+  return { ...saved, update, setNotice }
 }
 
 // Edits are local until blur or Enter, so typing through intermediate values
@@ -86,23 +105,11 @@ const LEVELS = [1, 2, 3, 4, 5]
 const levelLines = (l: number) => l + 4
 
 export default function App() {
-  const [state, saveState] = useUrlState()
-  // Set when the last edit was refused as impossible; cleared by the next accepted one.
-  const [refused, setRefused] = useState(false)
-  const setState = (s: State) => {
-    const ok = saveState(s)
-    setRefused(!ok)
-    return ok
-  }
+  const { state, known, notice, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
-  const x = Math.min(state.x, maxLines(n, m))
-  const lines = useMemo(() => new Set(state.lines), [state.lines])
-  const board = useMemo(() => ({ n, m, x }), [n, m, x])
-
-  const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [board, lines, played])
-  const blocked = useMemo(() => new Set(traces.flatMap((t) => t.straight)), [traces])
-  const result = useMemo(() => analyze(board, lines, blocked), [board, lines, blocked])
+  const { board, lines, traces, blocked, result } = known
+  const { x } = board
 
   const math = strategy === 'mathematician'
   // The search can take a second on big boards, so it runs in a worker; changing the inputs
@@ -111,7 +118,7 @@ export default function App() {
   const [computing, setComputing] = useState(false)
   useEffect(() => {
     setExpected(null)
-    if (!math || !result.ok) return setComputing(false)
+    if (!math) return setComputing(false)
     setComputing(true)
     const worker = new Worker(new URL('./strategy.worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (e: MessageEvent<Expected>) => {
@@ -160,7 +167,7 @@ export default function App() {
   const togglePlayed = (s: number) =>
     setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => {
-    setClick(null)
+    cancelClick()
     setState({ ...state, lines: [], played: [] })
   }
 
@@ -178,18 +185,27 @@ export default function App() {
   }
   // Clicking steps builds a route without dragging: a vertical step starts one from its
   // column's start, and further vertical steps / gaps extend it. Reaching the destination
-  // commits it; Escape or Cancel drops it.
+  // commits it; Escape or Cancel drops it. A refused route stays as the draft, so it can
+  // be stepped back and fixed instead of redrawn.
   const [click, setClick] = useState<Node[] | null>(null)
+  const saveRoute = (path: Node[]) => {
+    const next = commit(state, path)
+    if (next) return setState(next)
+    setNotice('contradicts')
+    return false
+  }
   const extendClick = (target: Node) => {
     const next = extend(click ?? [[-1, target[1]]], target, m)
-    if (next[next.length - 1][0] === m) {
-      setState(commit(state, next))
-      setClick(null)
-    } else setClick(next)
+    setClick(next[next.length - 1][0] === m && saveRoute(next) ? null : next)
+  }
+  // dropping the draft also drops the notice about why it wasn't saved
+  const cancelClick = () => {
+    setClick(null)
+    setNotice(null)
   }
   useEffect(() => {
     if (!click) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && cancelClick()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [click])
@@ -199,7 +215,7 @@ export default function App() {
     if (!e.isPrimary || e.button !== 0 || pointer.current) return
     svgRef.current!.setPointerCapture(e.pointerId)
     pointer.current = { id: e.pointerId, moved: false }
-    setClick(null)
+    cancelClick()
     setDrag([[-1, s]])
   }
   const onMove = (e: React.PointerEvent) => {
@@ -214,8 +230,10 @@ export default function App() {
   }
   const onUp = (e: React.PointerEvent) => {
     if (!drag || e.pointerId !== pointer.current?.id) return
-    if (drag[drag.length - 1][0] === m) setState(commit(state, drag))
-    else if (!pointer.current.moved) togglePlayed(drag[0][1])
+    // a refused drag becomes a click draft rather than being lost
+    if (drag[drag.length - 1][0] === m) {
+      if (!saveRoute(drag)) setClick(drag)
+    } else if (!pointer.current.moved) togglePlayed(drag[0][1])
     endDrag()
   }
 
@@ -224,14 +242,14 @@ export default function App() {
     document.title = t.title
   }, [lang, t])
 
-  const probs = result.ok ? result.prob.map((row) => row[dest]) : []
+  const probs = result.prob.map((row) => row[dest])
   const best = probs.length ? Math.max(...probs) : 0
   const tokens = expected?.ok && !expected.reached ? expected.perStart : []
   const bestTokens = expected?.ok ? expected.best : 0
   const isTokenBest = (s: number) => tokens[s] != null && tokens[s]! - bestTokens < 1e-9
   // until the worker answers, the starts show the gambler's numbers
   const showTokens = tokens.length > 0
-  const isPick = (s: number) => (showTokens ? isTokenBest(s) : result.ok && probs[s] === best && best > 0)
+  const isPick = (s: number) => (showTokens ? isTokenBest(s) : probs[s] === best && best > 0)
 
   return (
     <div className="app">
@@ -258,10 +276,10 @@ export default function App() {
         <div className="main">
           <div className="board-wrap">
             <div className="board-bar">
-              {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
+              {click && <button onClick={cancelClick}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
-            {refused && <p className="error">{t.impossible}</p>}
+            {notice && <p className="error">{t[notice]}</p>}
             <div className="presets">
               <div className="buttons" role="group" aria-label={t.presets}>
                 {LEVELS.map((l) => (
@@ -271,7 +289,7 @@ export default function App() {
                     aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
                     title={t.level(l, levelLines(l))}
                     onClick={() => {
-                      setClick(null)
+                      cancelClick()
                       setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], played: [] })
                     }}
                   >
@@ -403,7 +421,7 @@ export default function App() {
                         {tokens[s]!.toFixed(2)}
                       </text>
                     )}
-                    {!showTokens && result.ok && (
+                    {!showTokens && (
                       <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
                         {pct(p)}
                       </text>
@@ -486,7 +504,7 @@ export default function App() {
             />
             <div className="buttons">
               <button onClick={() => {
-                setClick(null)
+                cancelClick()
                 setState({ ...DEFAULT, lang })
               }}>{t.resetAll}</button>
               <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>{t.copyLink}</button>
@@ -495,63 +513,53 @@ export default function App() {
 
           <section>
             <h2>{t.odds(dest + 1)}</h2>
-            {result.ok ? (
-              <>
-                <p className="meta">
-                  {t.summary(result.remaining, result.layouts, formatCount(result.layouts, lang))}
-                </p>
-                <ol className="bars">
-                  {probs.map((p, s) => (
-                    <li key={s} className={isPick(s) ? 'best' : ''}>
-                      <span className="name">{letter(s)}</span>
-                      <span className="bar">
-                        <span style={{ width: `${p * 100}%` }} />
-                      </span>
-                      <span className="val">{pct(p)}</span>
-                    </li>
-                  ))}
-                </ol>
-              </>
-            ) : (
-              <p className="error">
-                {result.error === 'tooManyLines' ? t.tooManyLines(lines.size, x) : t.noLayout}
-              </p>
-            )}
+            <p className="meta">
+              {t.summary(result.remaining, result.layouts, formatCount(result.layouts, lang))}
+            </p>
+            <ol className="bars">
+              {probs.map((p, s) => (
+                <li key={s} className={isPick(s) ? 'best' : ''}>
+                  <span className="name">{letter(s)}</span>
+                  <span className="bar">
+                    <span style={{ width: `${p * 100}%` }} />
+                  </span>
+                  <span className="val">{pct(p)}</span>
+                </li>
+              ))}
+            </ol>
           </section>
 
-          {result.ok && (
-            <section>
-              <h2>{t.fullMatrix}</h2>
-              <table className="matrix">
-                <thead>
-                  <tr>
-                    <th />
-                    {Array.from({ length: n }, (_, d) => (
-                      <th key={d} className={d === dest ? 'sel' : ''}>
-                        {d + 1}
-                      </th>
+          <section>
+            <h2>{t.fullMatrix}</h2>
+            <table className="matrix">
+              <thead>
+                <tr>
+                  <th />
+                  {Array.from({ length: n }, (_, d) => (
+                    <th key={d} className={d === dest ? 'sel' : ''}>
+                      {d + 1}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {result.prob.map((row, s) => (
+                  <tr key={s}>
+                    <th>{letter(s)}</th>
+                    {row.map((p, d) => (
+                      <td
+                        key={d}
+                        className={d === dest ? 'sel' : ''}
+                        style={{ background: `rgba(56, 214, 255, ${p * 0.55})` }}
+                      >
+                        {Math.round(p * 100)}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.prob.map((row, s) => (
-                    <tr key={s}>
-                      <th>{letter(s)}</th>
-                      {row.map((p, d) => (
-                        <td
-                          key={d}
-                          className={d === dest ? 'sel' : ''}
-                          style={{ background: `rgba(56, 214, 255, ${p * 0.55})` }}
-                        >
-                          {Math.round(p * 100)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </section>
 
           <section className="notes">
             <h2>{t.assumptions}</h2>
