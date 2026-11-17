@@ -33,15 +33,12 @@ const touches = (line: string, dot: string) => {
   return key(r, c) === dot || key(r, c + 1) === dot
 }
 
-// Apply a drawn route to the board: sideways steps become revealed lines, and the route
-// is taken as truth, so anything it contradicts is dropped. A route that reaches the
-// destination row marks its start as traced, which already implies the dots it passes
-// straight through (and lets lines be clicked onto it, like a clicked trace). A partial
-// route can't be traced, so its straight dots are stored as marked-empty instead.
+// Apply a route drawn down to the destination row: sideways steps become revealed lines,
+// and the route is taken as truth, so anything it contradicts is dropped. Its start is
+// marked as traced, which already implies the dots it passes straight through.
 export function commit(state: State, path: Node[]): State {
   let lines = [...state.lines]
   const empty = new Set(state.empty)
-  const straight: string[] = []
   for (let i = 0; i < path.length; i++) {
     const [r, c] = path[i]
     if (r < 0 || r >= state.m) continue
@@ -57,13 +54,10 @@ export function commit(state: State, path: Node[]): State {
     } else if (next) {
       const d = key(r, c)
       lines = lines.filter((l) => !touches(l, d))
-      straight.push(d)
     }
   }
   const start = path[0][1]
-  const complete = path[path.length - 1][0] === state.m
-  if (!complete) straight.forEach((d) => empty.add(d))
-  const played = !complete || state.played.includes(start) ? state.played : [...state.played, start]
+  const played = state.played.includes(start) ? state.played : [...state.played, start]
   return { ...state, lines, empty: [...empty], played }
 }
 

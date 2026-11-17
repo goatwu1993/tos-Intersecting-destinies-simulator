@@ -130,41 +130,24 @@ export default function App() {
     return s
   }, [lines])
 
-  // A new line can't touch another line's end or a dot marked as having no line. Dots a
-  // traced route merely passes through are allowed: the trace reroutes through the new line.
-  const lineConflict = (r: number, c: number) =>
-    [key(r, c), key(r, c + 1)].some((d) => lineEnds.has(d) || empty.has(d))
-
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
   const toPoints = (nodes: [number, number][]) => nodes.map(([r, c]) => `${cx(c)},${cy(r)}`).join(' ')
   const width = PAD_X * 2 + (n - 1) * GX
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
-  const toggleLine = (r: number, c: number) => {
-    if (click) {
-      const last = click[click.length - 1][1]
-      return extendClick([r, last <= c ? c + 1 : c])
-    }
-    const k = key(r, c)
-    if (lines.has(k)) return setState({ ...state, lines: state.lines.filter((l) => l !== k) })
-    if (lineConflict(r, c)) return
-    setState({ ...state, lines: [...state.lines, k] })
+  // Lines and no-line dots only come from whole routes, as in the game, so gaps are only
+  // clickable while building a route: they step it sideways.
+  const clickGap = (r: number, c: number) => {
+    if (!click) return
+    const last = click[click.length - 1][1]
+    extendClick([r, last <= c ? c + 1 : c])
   }
   // r is the row of the segment's upper node (-1 = below the start post)
-  const clickSegment = (r: number, c: number) => {
-    if (click || r < 0 || !empty.has(key(r, c))) return extendClick([r + 1, c])
-    toggleEmpty(r, c)
-  }
-  const toggleEmpty = (r: number, c: number) => {
-    const k = key(r, c)
-    if (empty.has(k)) return setState({ ...state, empty: state.empty.filter((d) => d !== k) })
-    if (lineEnds.has(k)) return
-    setState({ ...state, empty: [...state.empty, k] })
-  }
+  const clickSegment = (r: number, c: number) => extendClick([r + 1, c])
   // Clicking an untraced start fast-forwards it to a destination along the revealed lines;
-  // click lines onto its path afterwards and it reroutes. Clicking a traced start removes
-  // its route and what it revealed.
+  // draw a route from it afterwards to correct it. Clicking a traced start removes its
+  // route and what it revealed.
   const togglePlayed = (s: number) =>
     setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => {
@@ -172,8 +155,8 @@ export default function App() {
     setState({ ...state, lines: [], empty: [], played: [] })
   }
 
-  // Dragging from a start draws a route; releasing without ever leaving the start toggles
-  // the trace. Dragging away and back onto the start cancels instead.
+  // Dragging from a start draws a route, committed only if released on the destination row;
+  // releasing without ever leaving the start toggles the trace. Anything else cancels.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
   const pointer = useRef<{ id: number; moved: boolean } | null>(null)
@@ -186,7 +169,7 @@ export default function App() {
   }
   // Clicking steps builds a route without dragging: a vertical step starts one from its
   // column's start, and further vertical steps / gaps extend it. Reaching the destination
-  // commits it; Commit keeps a partial route, Escape or Cancel drops it.
+  // commits it; Escape or Cancel drops it.
   const [click, setClick] = useState<Node[] | null>(null)
   const extendClick = (target: Node) => {
     const next = extend(click ?? [[-1, target[1]]], target, m)
@@ -194,10 +177,6 @@ export default function App() {
       setState(commit(state, next))
       setClick(null)
     } else setClick(next)
-  }
-  const commitClick = () => {
-    if (click && click.length > 1) setState(commit(state, click))
-    setClick(null)
   }
   useEffect(() => {
     if (!click) return
@@ -226,7 +205,7 @@ export default function App() {
   }
   const onUp = (e: React.PointerEvent) => {
     if (!drag || e.pointerId !== pointer.current?.id) return
-    if (drag.length > 1) setState(commit(state, drag))
+    if (drag[drag.length - 1][0] === m) setState(commit(state, drag))
     else if (!pointer.current.moved) togglePlayed(drag[0][1])
     endDrag()
   }
@@ -270,12 +249,7 @@ export default function App() {
         <div className="main">
           <div className="board-wrap">
             <div className="board-bar">
-              {click && (
-                <>
-                  <button onClick={commitClick}>{t.commitRoute}</button>
-                  <button onClick={() => setClick(null)}>{t.cancelRoute}</button>
-                </>
-              )}
+              {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
             <div className="presets">
@@ -357,16 +331,15 @@ export default function App() {
                 }),
               )}
 
-              {/* clickable vertical segments between nodes: build a route, or unmark a no-line dot */}
+              {/* clickable vertical segments between nodes: start or extend a route */}
               {Array.from({ length: m + 1 }, (_, i) =>
                 Array.from({ length: n }, (_, c) => {
                   const r = i - 1
                   const k = key(r, c)
-                  const on = r >= 0 && empty.has(k)
                   return (
                     <rect
                       key={k}
-                      className={`hit vhit ${on ? 'on' : ''}`}
+                      className="hit vhit"
                       x={cx(c) - 10}
                       y={cy(r) + 10}
                       width={20}
@@ -374,30 +347,28 @@ export default function App() {
                       rx={6}
                       onClick={() => clickSegment(r, c)}
                     >
-                      <title>{on && !click ? t.unmark : t.markEmpty}</title>
+                      <title>{t.stepDown}</title>
                     </rect>
                   )
                 }),
               )}
 
-              {/* clickable gaps between dots */}
-              {Array.from({ length: m }, (_, r) =>
+              {/* clickable gaps between dots, while building a route */}
+              {click && Array.from({ length: m }, (_, r) =>
                 Array.from({ length: n - 1 }, (_, c) => {
                   const k = key(r, c)
-                  const on = lines.has(k)
-                  const conflict = !on && lineConflict(r, c)
                   return (
                     <rect
                       key={k}
-                      className={`hit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
+                      className="hit"
                       x={cx(c) + 10}
                       y={cy(r) - 18}
                       width={GX - 20}
                       height={36}
                       rx={6}
-                      onClick={() => toggleLine(r, c)}
+                      onClick={() => clickGap(r, c)}
                     >
-                      <title>{on ? t.removeLine : conflict ? t.lineConflict : t.revealLine}</title>
+                      <title>{t.stepAcross}</title>
                     </rect>
                   )
                 }),

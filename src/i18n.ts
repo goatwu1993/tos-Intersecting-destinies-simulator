@@ -12,10 +12,9 @@ const en = {
   langName: 'English',
   title: 'Intersecting Destinies Simulator',
   rules: [
-    'Drag from a start down the board to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
-    'Click between two dots to toggle a line.',
-    'Click a vertical segment to mark that dot as having no line.',
-    'Click a start to fast-forward it to a destination, then click lines onto its path as you reveal them.',
+    'Drag from a start down to the destination row to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
+    'Or click vertical segments to build a route step by step; once building, click between two dots to take a line. It is saved when it reaches the destination row.',
+    'Click a start to fast-forward it to a destination along the revealed lines; draw a route from it to correct it.',
     'Click a start that already has a route to remove that route (and the lines and no-line dots only it revealed).',
     'Click a destination to target it.',
     'Click Reset to clear all revealed lines, no-line dots and routes.',
@@ -24,15 +23,10 @@ const en = {
   reset: 'Reset',
   fewerLines: 'Fewer total lines',
   moreLines: 'More total lines',
-  commitRoute: 'Commit route',
   cancelRoute: 'Cancel route',
   linesRevealed: (revealed: number, x: number) => `Lines revealed: ${revealed} / ${x}`,
-  unmark: 'Unmark (unknown)',
-  lineEndsHere: 'A line ends here',
-  markEmpty: 'Mark: no line at this dot',
-  removeLine: 'Remove line',
-  lineConflict: 'Conflicts with another line or a dot marked as having no line',
-  revealLine: 'Reveal line',
+  stepDown: 'Route: go straight down',
+  stepAcross: 'Route: take this line',
   board: 'Board',
   presets: 'Presets',
   level: (l: number, x: number) => `Level ${l} · ${x} lines`,
@@ -60,8 +54,8 @@ const en = {
   assumptions: 'Assumptions',
   assumptionsBody:
     'Hidden lines are equally likely to be any layout consistent with what you know: the ' +
-    'revealed lines, and every dot known to have no line (shown hollow) — either marked by ' +
-    'you or passed straight through by a traced route. Lines join adjacent columns on the same ' +
+    'revealed lines, and every dot known to have no line (shown hollow) because a traced ' +
+    'route passes straight through it. Lines join adjacent columns on the same ' +
     'row and never share a dot.',
   tooManyLines: (revealed: number, x: number) => `${revealed} lines revealed but only ${x} exist.`,
   noLayout: 'No layout of the hidden lines is consistent with this board.',
@@ -73,10 +67,9 @@ const zh: Messages = {
   langName: '繁體中文',
   title: '路徑模擬器',
   rules: [
-    '從起點往下拖曳，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
-    '點擊兩點之間可新增或移除橫線。',
-    '點擊直線段可將該點標記為沒有橫線。',
-    '點擊起點讓它沿著已揭示的橫線直達終點，之後再把陸續揭示的橫線點到它的路徑上。',
+    '從起點往下拖曳到終點列，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
+    '或點擊直線段逐步建立路線；建立中可點擊兩點之間走橫線。抵達終點列時即儲存。',
+    '點擊起點讓它沿著已揭示的橫線直達終點；之後可從該起點重畫路線來修正。',
     '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線與無橫線點）。',
     '點擊終點可將它設為目標。',
     '點擊「重置」可清除所有已揭示的橫線、無橫線點與路線。',
@@ -85,15 +78,10 @@ const zh: Messages = {
   reset: '重置',
   fewerLines: '減少橫線總數',
   moreLines: '增加橫線總數',
-  commitRoute: '確定路線',
   cancelRoute: '取消路線',
   linesRevealed: (revealed, x) => `已揭示橫線：${revealed} / ${x}`,
-  unmark: '取消標記（恢復為未知）',
-  lineEndsHere: '此點已連接橫線',
-  markEmpty: '標記：此點沒有橫線',
-  removeLine: '移除橫線',
-  lineConflict: '與其他橫線或已標記為沒有橫線的點衝突',
-  revealLine: '揭示橫線',
+  stepDown: '路線：直行向下',
+  stepAcross: '路線：走這條橫線',
   board: '盤面',
   presets: '預設關卡',
   level: (l, x) => `關卡 ${l} · ${x} 條橫線`,
@@ -118,7 +106,7 @@ const zh: Messages = {
   assumptions: '假設',
   assumptionsBody:
     '未揭示的橫線會以相同機率出現在任何與已知資訊相符的排列中：已知資訊包含已揭示的橫線，' +
-    '以及所有確定沒有橫線的點（以空心顯示）——不論是你手動標記的，還是被已追蹤路線直行通過的。' +
+    '以及所有確定沒有橫線的點（以空心顯示）——即被已追蹤路線直行通過的點。' +
     '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點。',
   tooManyLines: (revealed, x) => `已揭示 ${revealed} 條橫線，但總共只有 ${x} 條。`,
   noLayout: '未揭示的橫線沒有任何排列能符合目前的盤面。',
