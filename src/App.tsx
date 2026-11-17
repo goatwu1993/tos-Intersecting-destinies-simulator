@@ -191,7 +191,6 @@ export default function App() {
             ))}
           </div>
         </div>
-        <p className="sub">{t.intro}</p>
       </header>
 
       <div className="layout">
@@ -331,6 +330,11 @@ export default function App() {
               </g>
             ))}
           </svg>
+          <ul className="rules">
+            {t.rules.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
         </div>
 
         <aside className="panel">

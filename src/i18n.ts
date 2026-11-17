@@ -11,13 +11,14 @@ export const parseLang = (v: string | null): Lang => (v?.toLowerCase().startsWit
 const en = {
   langName: 'English',
   title: 'Intersecting Destinies Simulator',
-  intro:
-    'Drag from a start down the board to draw a route you saw (sideways steps become lines, ' +
-    'straight steps mark dots as having no line). Or click between two dots to toggle a line, ' +
-    'click a vertical segment to mark that dot as having no line, click a start to fast-forward it ' +
-    'to a destination, then click lines onto its path as you reveal them; click a traced start again ' +
-    'to remove its route (and the lines and no-line dots only it revealed), and click a destination ' +
-    'to target it.',
+  rules: [
+    'Drag from a start down the board to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
+    'Click between two dots to toggle a line.',
+    'Click a vertical segment to mark that dot as having no line.',
+    'Click a start to fast-forward it to a destination, then click lines onto its path as you reveal them.',
+    'Click a traced start again to remove its route (and the lines and no-line dots only it revealed).',
+    'Click a destination to target it.',
+  ],
   language: 'Language',
   reset: 'Reset',
   linesRevealed: (revealed: number, x: number) => `Lines revealed: ${revealed} / ${x}`,
@@ -53,12 +54,14 @@ export type Messages = typeof en
 const zh: Messages = {
   langName: '繁體中文',
   title: '路徑模擬器',
-  intro:
-    '從起點往下拖曳，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。' +
-    '也可以點擊兩點之間來新增或移除橫線、點擊直線段將該點標記為沒有橫線、' +
-    '點擊起點讓它沿著已揭示的橫線直達終點，之後再把陸續揭示的橫線點到它的路徑上；' +
-    '再次點擊已追蹤的起點可移除其路線（以及只有該路線揭示的橫線與無橫線點），' +
-    '點擊終點則可將它設為目標。',
+  rules: [
+    '從起點往下拖曳，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
+    '點擊兩點之間可新增或移除橫線。',
+    '點擊直線段可將該點標記為沒有橫線。',
+    '點擊起點讓它沿著已揭示的橫線直達終點，之後再把陸續揭示的橫線點到它的路徑上。',
+    '再次點擊已追蹤的起點可移除其路線（以及只有該路線揭示的橫線與無橫線點）。',
+    '點擊終點可將它設為目標。',
+  ],
   language: '語言',
   reset: '重置',
   linesRevealed: (revealed, x) => `已揭示橫線：${revealed} / ${x}`,
