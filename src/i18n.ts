@@ -12,6 +12,8 @@ const en = {
   langName: 'English',
   title: 'Intersecting Destinies Simulator',
   rules: [
+    'Every start and every destination always has a vertical line: a route goes straight down from its start and straight into its destination.',
+    'Every route from a start to its destination changes lane at least once, so every column has at least one line and a route that goes straight down is invalid.',
     'Drag from a start down to the destination row to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
     'Or click a vertical segment to start a route and grow it from either end, top-down or bottom-up: click segments to go straight, or click between two dots to take a line (the step past it is added for you, since two lines can’t meet). Click a piece of the route to undo it and what you added beyond it (undoing the step past a line undoes the line too; undoing the first segment drops the route). Only pieces that change the route are clickable. It is saved once it joins a start to a destination.',
     'Draw a route again from a traced start to correct it. A route that contradicts another traced route, or that no layout of the lines allows, is not saved.',
@@ -73,6 +75,8 @@ const zh: Messages = {
   langName: '繁體中文',
   title: '路徑模擬器',
   rules: [
+    '每個起點與終點一定都有一條直線：路線從起點筆直向下，也筆直進入終點。',
+    '每條從起點到終點的路線至少會換道一次，因此每一欄至少有一條橫線，一路直行的路線不成立。',
     '從起點往下拖曳到終點列，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
     '或點擊直線段開始建立路線，可從任一端往上或往下延伸：點擊直線段直行，或點擊兩點之間走橫線（兩條橫線不能相連，所以會自動補上橫線後的一步）。點擊路線上的一段可撤銷該段及其後加上的部分（撤銷橫線後的一步會連同橫線一起撤銷；撤銷第一段則取消整條路線）。只有會改變路線的地方可以點擊。路線連接起點與終點時即儲存。',
     '從已追蹤的起點重畫路線即可修正。與其他已追蹤路線矛盾、或沒有任何橫線排列允許的路線不會被儲存。',
