@@ -84,6 +84,11 @@ h1 {
   align-items: flex-start;
 }
 
+.presets .buttons {
+  margin: 0 0 12px;
+  justify-content: center;
+}
+
 .board-wrap {
   display: flex;
   flex-direction: column;

@@ -278,6 +278,24 @@ export default function App() {
               )}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
+            <div className="presets">
+              <div className="buttons" role="group" aria-label={t.presets}>
+                {LEVELS.map((l) => (
+                  <button
+                    key={l}
+                    className={n === 6 && m === 5 && state.x === levelLines(l) ? 'on' : ''}
+                    aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
+                    title={t.level(l, levelLines(l))}
+                    onClick={() => {
+                      setClick(null)
+                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })
+                    }}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="counter">
               <button
                 aria-label={t.fewerLines}
@@ -460,26 +478,6 @@ export default function App() {
               ) : (
                 <p className="error">{t.tooLarge}</p>
               ))}
-          </section>
-
-          <section>
-            <h2>{t.presets}</h2>
-            <div className="buttons">
-              {LEVELS.map((l) => (
-                <button
-                  key={l}
-                  className={n === 6 && m === 5 && state.x === levelLines(l) ? 'on' : ''}
-                  aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
-                  title={t.level(l, levelLines(l))}
-                  onClick={() => {
-                    setClick(null)
-                    setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })
-                  }}
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
           </section>
 
           <section>
