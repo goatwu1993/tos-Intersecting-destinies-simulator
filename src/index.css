@@ -160,15 +160,6 @@ h1 {
 .hit:hover {
   fill: #e3b34133;
 }
-.hit.on:hover {
-  fill: #ff5c5c33;
-}
-.hit.conflict {
-  cursor: not-allowed;
-}
-.hit.conflict:hover {
-  fill: transparent;
-}
 
 .badge {
   cursor: pointer;
@@ -366,9 +357,6 @@ button:hover {
 }
 .vhit:hover {
   fill: #38d6ff22;
-}
-.vhit.on:hover {
-  fill: #ff5c5c33;
 }
 
 .board-bar {

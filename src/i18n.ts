@@ -14,11 +14,10 @@ const en = {
   rules: [
     'Every start and every destination always has a vertical line: a route goes straight down from its start and straight into its destination.',
     'Every route from a start to its destination changes lane at least once, so every column has at least one line and a route that goes straight down is invalid.',
-    'Drag from a start down the board to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
-    'Click between two dots to toggle a line.',
-    'Click vertical segments (and the gaps between dots) to build a route step by step; reaching the destination commits it, or use Commit route. Click a segment under a no-line dot to unmark it.',
-    'Click a start to fast-forward it to a destination, then click lines onto its path as you reveal them.',
-    'Click a start that already has a route to remove that route (and the lines and no-line dots only it revealed).',
+    'Drag from a start down to the destination row to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
+    'Or click a vertical segment to start a route and grow it from either end, top-down or bottom-up: click segments to go straight, or click between two dots to take a line (the step past it is added for you, since two lines can’t meet). Click a piece of the route to undo it and what you added beyond it (undoing the step past a line undoes the line too; undoing the first segment drops the route). Only pieces that change the route are clickable. It is saved once it joins a start to a destination.',
+    'Draw a route again from a traced start to correct it. A route that contradicts another traced route, or that no layout of the lines allows, is not saved.',
+    'Click a start that already has a route to remove that route (and the lines only it revealed).',
     'Click a destination to target it.',
     'Click Reset to clear all revealed lines, no-line dots and routes.',
   ],
@@ -26,15 +25,18 @@ const en = {
   reset: 'Reset',
   fewerLines: 'Fewer total lines',
   moreLines: 'More total lines',
-  commitRoute: 'Commit route',
   cancelRoute: 'Cancel route',
   linesRevealed: (revealed: number, x: number) => `Lines revealed: ${revealed} / ${x}`,
-  unmark: 'Unmark (unknown)',
-  lineEndsHere: 'A line ends here',
-  markEmpty: 'Mark: no line at this dot',
-  removeLine: 'Remove line',
-  lineConflict: 'Conflicts with another line or a dot marked as having no line',
-  revealLine: 'Reveal line',
+  startRoute: 'Route: start here',
+  stepStraight: 'Route: go straight',
+  undoStep: 'Route: undo from here',
+  stepAcross: 'Route: take this line',
+  impossible: 'Not saved: no layout of the lines agrees with that.',
+  contradicts: 'Not saved: this route contradicts a route already traced.',
+  shape: 'Not saved: every column needs a line, and this board can’t hold enough lines for that (n columns need at least ⌈n / 2⌉ lines).',
+  drawRoute: 'To trace a start, drag from it all the way to a destination, or click its route out segment by segment.',
+  adjusted:
+    'This link had parts that couldn’t be kept (lines no traced route crosses or that overlap, no-line dots, out-of-range values, or impossible routes); they were removed or corrected.',
   board: 'Board',
   presets: 'Presets',
   level: (l: number, x: number) => `Level ${l} · ${x} lines`,
@@ -62,11 +64,9 @@ const en = {
   assumptions: 'Assumptions',
   assumptionsBody:
     'Hidden lines are equally likely to be any layout consistent with what you know: the ' +
-    'revealed lines, and every dot known to have no line (shown hollow) — either marked by ' +
-    'you or passed straight through by a traced route. Lines join adjacent columns on the same ' +
-    'row and never share a dot.',
-  tooManyLines: (revealed: number, x: number) => `${revealed} lines revealed but only ${x} exist.`,
-  noLayout: 'No layout of the hidden lines is consistent with this board.',
+    'revealed lines, and every dot known to have no line (shown hollow) because a traced ' +
+    'route passes straight through it. Lines join adjacent columns on the same ' +
+    'row and never share a dot, and every start changes track at least once (every column has a line).',
 }
 
 export type Messages = typeof en
@@ -77,11 +77,10 @@ const zh: Messages = {
   rules: [
     '每個起點與終點一定都有一條直線：路線從起點筆直向下，也筆直進入終點。',
     '每條從起點到終點的路線至少會換道一次，因此每一欄至少有一條橫線，一路直行的路線不成立。',
-    '從起點往下拖曳，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
-    '點擊兩點之間可新增或移除橫線。',
-    '點擊直線段（與點之間的空隙）可一步步建立路線；抵達終點即完成，也可按「確定路線」。點擊無橫線點下方的直線段可取消標記。',
-    '點擊起點讓它沿著已揭示的橫線直達終點，之後再把陸續揭示的橫線點到它的路徑上。',
-    '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線與無橫線點）。',
+    '從起點往下拖曳到終點列，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
+    '或點擊直線段開始建立路線，可從任一端往上或往下延伸：點擊直線段直行，或點擊兩點之間走橫線（兩條橫線不能相連，所以會自動補上橫線後的一步）。點擊路線上的一段可撤銷該段及其後加上的部分（撤銷橫線後的一步會連同橫線一起撤銷；撤銷第一段則取消整條路線）。只有會改變路線的地方可以點擊。路線連接起點與終點時即儲存。',
+    '從已追蹤的起點重畫路線即可修正。與其他已追蹤路線矛盾、或沒有任何橫線排列允許的路線不會被儲存。',
+    '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線）。',
     '點擊終點可將它設為目標。',
     '點擊「重置」可清除所有已揭示的橫線、無橫線點與路線。',
   ],
@@ -89,15 +88,17 @@ const zh: Messages = {
   reset: '重置',
   fewerLines: '減少橫線總數',
   moreLines: '增加橫線總數',
-  commitRoute: '確定路線',
   cancelRoute: '取消路線',
   linesRevealed: (revealed, x) => `已揭示橫線：${revealed} / ${x}`,
-  unmark: '取消標記（恢復為未知）',
-  lineEndsHere: '此點已連接橫線',
-  markEmpty: '標記：此點沒有橫線',
-  removeLine: '移除橫線',
-  lineConflict: '與其他橫線或已標記為沒有橫線的點衝突',
-  revealLine: '揭示橫線',
+  startRoute: '路線：從這裡開始',
+  stepStraight: '路線：直行',
+  undoStep: '路線：從這裡撤銷',
+  stepAcross: '路線：走這條橫線',
+  impossible: '未儲存：沒有任何橫線排列符合此狀態。',
+  contradicts: '未儲存：此路線與已追蹤的路線矛盾。',
+  shape: '未儲存：每條直線都需要至少一條橫線，但此盤面放不下足夠的橫線（n 條直線至少需要 ⌈n / 2⌉ 條橫線）。',
+  drawRoute: '要追蹤起點，請從起點一路拖曳到終點，或逐段點擊畫出路線。',
+  adjusted: '此連結含有無法保留的內容（沒有路線經過或彼此重疊的橫線、無橫線點、超出範圍的數值或不可能的路線），已移除或修正。',
   board: '盤面',
   presets: '預設關卡',
   level: (l, x) => `關卡 ${l} · ${x} 條橫線`,
@@ -122,10 +123,8 @@ const zh: Messages = {
   assumptions: '假設',
   assumptionsBody:
     '未揭示的橫線會以相同機率出現在任何與已知資訊相符的排列中：已知資訊包含已揭示的橫線，' +
-    '以及所有確定沒有橫線的點（以空心顯示）——不論是你手動標記的，還是被已追蹤路線直行通過的。' +
-    '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點。',
-  tooManyLines: (revealed, x) => `已揭示 ${revealed} 條橫線，但總共只有 ${x} 條。`,
-  noLayout: '未揭示的橫線沒有任何排列能符合目前的盤面。',
+    '以及所有確定沒有橫線的點（以空心顯示）——即被已追蹤路線直行通過的點。' +
+    '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點；每個起點至少會轉換一次軌道（每條直線都至少連著一條橫線）。',
 }
 
 export const messages: Record<Lang, Messages> = { 'zh-TW': zh, 'en-US': en }

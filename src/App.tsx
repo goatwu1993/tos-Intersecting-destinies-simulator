@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LANGS, messages, type Lang } from './i18n.ts'
-import { commit, extend, removeRoute, type Node } from './route.ts'
+import { clickLine, clickSegment, commit, complete, extend, removeRoute, type Draft, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
-import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
-import { DEFAULT, LIMITS, normalize, read, write, type State } from './urlState.ts'
+import type { OddsInput } from './odds.worker.ts'
+import { key, maxLines, parseKey, playable } from './solver.ts'
+import { DEFAULT, LIMITS, derive, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
 const GY = 56
@@ -26,19 +27,56 @@ const formatCount = (v: number, lang: Lang) => {
   return `≈ ${mant} × 10^${Number(exp)}`
 }
 
-function useUrlState(): [State, (s: State) => void] {
-  const [state, setState] = useState(() => read(window.location.search))
+// Why the board isn't what was asked for: an edit no layout agrees with, a route that
+// contradicts one already traced, or a link that was cleaned up on load.
+type Notice = 'impossible' | 'contradicts' | 'adjusted' | 'shape' | 'drawRoute'
+type Saved = { state: State; known: Known; notice: Notice | null }
+
+const load = (): Saved => {
+  const { state, known, dropped } = read(window.location.search)
+  return { state, known, notice: dropped ? 'adjusted' : null }
+}
+
+// Put the state's saved form in the URL. On load this also rewrites a link that had
+// something dropped or clamped, so reloading or copying it doesn't pass that on.
+const rewrite = (s: State) => {
+  const url = write(s)
+  if (url !== window.location.search) window.history.replaceState(null, '', url)
+}
+
+// Only possible states are saved: an update whose routes no layout agrees with is refused
+// (returns false), the board and URL stay as they were, and the notice says why. A notice
+// is about the board, so it stays until the board or routes change.
+function useUrlState() {
+  const [saved, setSaved] = useState(load)
+  // counts back/forward loads, so anything tied to the old state can reset
+  const [loads, setLoads] = useState(0)
   useEffect(() => {
-    const onPop = () => setState(read(window.location.search))
+    rewrite(saved.state)
+    const onPop = () => {
+      const next = load()
+      rewrite(next.state)
+      setSaved(next)
+      setLoads((v) => v + 1)
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  const setNotice = (notice: Notice | null) => setSaved((v) => (v.notice === notice ? v : { ...v, notice }))
   const update = (s: State) => {
     const next = normalize(s)
-    window.history.replaceState(null, '', write(next))
-    setState(next)
+    // edits that leave the board and routes alone (language, destination…) reuse the odds
+    const same = sameBoard(next, saved.state)
+    const d = same ? { state: next, known: saved.known } : derive(next)
+    if (!d) {
+      setNotice('impossible')
+      return false
+    }
+    rewrite(d.state)
+    setSaved({ ...d, notice: same ? saved.notice : null })
+    return true
   }
-  return [state, update]
+  return { ...saved, loads, update, setNotice }
 }
 
 // Edits are local until blur or Enter, so typing through intermediate values
@@ -48,9 +86,10 @@ function NumberField(props: {
   min: number
   max: number
   value: number
-  onCommit: (v: number) => void
+  disabled?: boolean
+  onCommit: (v: number) => boolean
 }) {
-  const { label, min, max, value, onCommit } = props
+  const { label, min, max, value, disabled, onCommit } = props
   const [draft, setDraft] = useState(String(value))
   useEffect(() => setDraft(String(value)), [value])
   // Always report the entered value: `value` may be a capped view of a larger stored
@@ -59,8 +98,7 @@ function NumberField(props: {
     const v = parseInt(draft, 10)
     if (!Number.isFinite(v)) return setDraft(String(value))
     const clamped = Math.min(max, Math.max(min, v))
-    setDraft(String(clamped))
-    onCommit(clamped)
+    setDraft(String(onCommit(clamped) ? clamped : value))
   }
   return (
     <label>
@@ -70,6 +108,7 @@ function NumberField(props: {
         min={min}
         max={max}
         value={draft}
+        disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={apply}
         onKeyDown={(e) => e.key === 'Enter' && apply()}
@@ -83,17 +122,25 @@ const LEVELS = [1, 2, 3, 4, 5]
 const levelLines = (l: number) => l + 4
 
 export default function App() {
-  const [state, setState] = useUrlState()
+  const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
-  const x = Math.min(state.x, maxLines(n, m))
-  const lines = useMemo(() => new Set(state.lines), [state.lines])
-  const empty = useMemo(() => new Set(state.empty), [state.empty])
-  const board = useMemo(() => ({ n, m, x }), [n, m, x])
+  const { board, lines, ends: lineEnds, traces, blocked } = known
+  const { x } = board
 
-  const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [board, lines, played])
-  const blocked = useMemo(() => new Set([...empty, ...traces.flatMap((t) => t.straight)]), [empty, traces])
-  const result = useMemo(() => analyze(board, lines, blocked), [board, lines, blocked])
+  // Odds too slow to work out while handling an edit (big boards) come from a worker; until
+  // it answers, the board shows none. A stale answer is ignored by checking which Known it
+  // was for.
+  const [workerOdds, setWorkerOdds] = useState<{ known: Known; prob: number[][] | null } | null>(null)
+  useEffect(() => {
+    if (known.prob) return
+    const worker = new Worker(new URL('./odds.worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (e: MessageEvent<number[][] | null>) => setWorkerOdds({ known, prob: e.data })
+    const input: OddsInput = { board, lines: [...lines], blocked: [...blocked] }
+    worker.postMessage(input)
+    return () => worker.terminate()
+  }, [known])
+  const prob = known.prob ?? (workerOdds?.known === known ? workerOdds.prob : null)
 
   const math = strategy === 'mathematician'
   // The search can take a second on big boards, so it runs in a worker; changing the inputs
@@ -102,7 +149,7 @@ export default function App() {
   const [computing, setComputing] = useState(false)
   useEffect(() => {
     setExpected(null)
-    if (!math || !result.ok) return setComputing(false)
+    if (!math) return setComputing(false)
     setComputing(true)
     const worker = new Worker(new URL('./strategy.worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (e: MessageEvent<Expected>) => {
@@ -113,27 +160,15 @@ export default function App() {
       board,
       lines: [...lines],
       blocked: [...blocked],
-      played,
+      played: traces.map((t) => t.start),
       dest,
-      layoutCount: result.layouts,
+      layoutCount: known.layouts,
     }
     worker.postMessage(input)
     return () => worker.terminate()
-  }, [math, board, lines, blocked, played, dest, result])
-
-  const lineEnds = useMemo(() => {
-    const s = new Set<string>()
-    for (const k of lines) {
-      const [r, c] = parseKey(k)
-      s.add(key(r, c)).add(key(r, c + 1))
-    }
-    return s
-  }, [lines])
-
-  // A new line can't touch another line's end or a dot marked as having no line. Dots a
-  // traced route merely passes through are allowed: the trace reroutes through the new line.
-  const lineConflict = (r: number, c: number) =>
-    [key(r, c), key(r, c + 1)].some((d) => lineEnds.has(d) || empty.has(d))
+    // every input but dest comes from known, which only changes with the board or routes,
+    // so other edits (language…) don't restart the search
+  }, [math, known, dest])
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
@@ -141,39 +176,32 @@ export default function App() {
   const width = PAD_X * 2 + (n - 1) * GX
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
-  const toggleLine = (r: number, c: number) => {
-    if (click) {
-      const last = click[click.length - 1][1]
-      return extendClick([r, last <= c ? c + 1 : c])
+  // Routes are only drawn (dragged or clicked) in full; clicking a traced start removes its
+  // route and what it revealed.
+  // Tapping a start with no route can't trace it any more, so it says how to.
+  const untrace = (s: number) => (played.includes(s) ? setState(removeRoute(state, s)) : setNotice('drawRoute'))
+  // There can't be fewer lines in total than are already revealed, or more than the board
+  // holds. A board too small for the minimum shows its capacity, which can't be changed.
+  const minX = Math.max(LIMITS.x[0], lines.size)
+  const maxX = Math.min(LIMITS.x[1], maxLines(n, m))
+  // Routes seen on one board shape don't carry over to another, so a new shape starts
+  // empty, as a level preset does.
+  const resize = (size: { n: number } | { m: number }) => {
+    const next = { ...state, ...size }
+    if (next.n === n && next.m === m) return true
+    if (!playable(next.n, next.m, next.x)) {
+      setNotice('shape')
+      return false
     }
-    const k = key(r, c)
-    if (lines.has(k)) return setState({ ...state, lines: state.lines.filter((l) => l !== k) })
-    if (lineConflict(r, c)) return
-    setState({ ...state, lines: [...state.lines, k] })
+    return setState({ ...next, lines: [], played: [] })
   }
-  // r is the row of the segment's upper node (-1 = below the start post)
-  const clickSegment = (r: number, c: number) => {
-    if (click || r < 0 || !empty.has(key(r, c))) return extendClick([r + 1, c])
-    toggleEmpty(r, c)
-  }
-  const toggleEmpty = (r: number, c: number) => {
-    const k = key(r, c)
-    if (empty.has(k)) return setState({ ...state, empty: state.empty.filter((d) => d !== k) })
-    if (lineEnds.has(k)) return
-    setState({ ...state, empty: [...state.empty, k] })
-  }
-  // Clicking an untraced start fast-forwards it to a destination along the revealed lines;
-  // click lines onto its path afterwards and it reroutes. Clicking a traced start removes
-  // its route and what it revealed.
-  const togglePlayed = (s: number) =>
-    setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => {
     setClick(null)
-    setState({ ...state, lines: [], empty: [], played: [] })
+    setState({ ...state, lines: [], played: [] })
   }
 
-  // Dragging from a start draws a route; releasing without ever leaving the start toggles
-  // the trace. Dragging away and back onto the start cancels instead.
+  // Dragging from a start draws a route, committed only if released on the destination row;
+  // releasing without ever leaving the start untraces it. Anything else cancels.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
   const pointer = useRef<{ id: number; moved: boolean } | null>(null)
@@ -184,27 +212,41 @@ export default function App() {
     const r = Math.min(m, Math.max(-1, Math.round((pt.y - PAD_TOP) / GY) - 1))
     return [r, c]
   }
-  // Clicking steps builds a route without dragging: a vertical step starts one from its
-  // column's start, and further vertical steps / gaps extend it. Reaching the destination
-  // commits it; Commit keeps a partial route, Escape or Cancel drops it.
-  const [click, setClick] = useState<Node[] | null>(null)
-  const extendClick = (target: Node) => {
-    const next = extend(click ?? [[-1, target[1]]], target, m)
-    if (next[next.length - 1][0] === m) {
-      setState(commit(state, next))
-      setClick(null)
-    } else setClick(next)
+  // Clicking pieces builds a route without dragging (see Draft): a vertical segment starts
+  // one, and segments / lines at either end grow it. Once it joins a start to a destination
+  // it is committed; Escape or Cancel drops it. A route that is impossible or contradicts a
+  // traced one is dropped too, with a notice. Lines and no-line dots only come from whole
+  // routes, as in the game, so gaps are only clickable while building a route.
+  const [click, setClick] = useState<Draft | null>(null)
+  const saveRoute = (path: Node[]) => {
+    const next = commit(state, path)
+    if (next) setState(next)
+    else setNotice('contradicts')
   }
-  const commitClick = () => {
-    if (click && click.length > 1) setState(commit(state, click))
-    setClick(null)
+  const editDraft = (next: Draft | null) => {
+    if (next && complete(next, m)) {
+      saveRoute(next.path)
+      return setClick(null)
+    }
+    setClick(next)
   }
+  // What clicking a piece would do to the draft: nothing (not clickable), undo part of it,
+  // or extend / start it. Only pieces that change the draft are clickable.
+  const effect = (next: Draft | null) =>
+    next === click ? null : !next || (click && next.path.length < click.path.length) ? 'undo' : 'add'
+  const drafting = click !== null
   useEffect(() => {
-    if (!click) return
+    if (!drafting) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [click])
+  }, [drafting])
+  // A draft is drawn against one board; a new shape (resize) or a back/forward load drops it.
+  useEffect(() => {
+    setClick(null)
+    setDrag(null)
+    pointer.current = null
+  }, [n, m, loads])
 
   const onStartDown = (e: React.PointerEvent, s: number) => {
     // primary button / first finger only, one drag at a time
@@ -226,8 +268,9 @@ export default function App() {
   }
   const onUp = (e: React.PointerEvent) => {
     if (!drag || e.pointerId !== pointer.current?.id) return
-    if (drag.length > 1) setState(commit(state, drag))
-    else if (!pointer.current.moved) togglePlayed(drag[0][1])
+    if (drag[drag.length - 1][0] === m) saveRoute(drag)
+    else if (!pointer.current.moved) untrace(drag[0][1])
+    else setNotice('drawRoute') // released short of the destination row
     endDrag()
   }
 
@@ -236,14 +279,14 @@ export default function App() {
     document.title = t.title
   }, [lang, t])
 
-  const probs = result.ok ? result.prob.map((row) => row[dest]) : []
+  const probs = prob ? prob.map((row) => row[dest]) : []
   const best = probs.length ? Math.max(...probs) : 0
   const tokens = expected?.ok && !expected.reached ? expected.perStart : []
   const bestTokens = expected?.ok ? expected.best : 0
   const isTokenBest = (s: number) => tokens[s] != null && tokens[s]! - bestTokens < 1e-9
   // until the worker answers, the starts show the gambler's numbers
   const showTokens = tokens.length > 0
-  const isPick = (s: number) => (showTokens ? isTokenBest(s) : result.ok && probs[s] === best && best > 0)
+  const isPick = (s: number) => (showTokens ? isTokenBest(s) : probs[s] === best && best > 0)
 
   return (
     <div className="app">
@@ -270,14 +313,10 @@ export default function App() {
         <div className="main">
           <div className="board-wrap">
             <div className="board-bar">
-              {click && (
-                <>
-                  <button onClick={commitClick}>{t.commitRoute}</button>
-                  <button onClick={() => setClick(null)}>{t.cancelRoute}</button>
-                </>
-              )}
+              {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
+            {notice && <p className={notice === 'drawRoute' ? 'meta' : 'error'}>{t[notice]}</p>}
             <div className="presets">
               <div className="buttons" role="group" aria-label={t.presets}>
                 {LEVELS.map((l) => (
@@ -288,7 +327,7 @@ export default function App() {
                     title={t.level(l, levelLines(l))}
                     onClick={() => {
                       setClick(null)
-                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })
+                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], played: [] })
                     }}
                   >
                     {l}
@@ -299,7 +338,7 @@ export default function App() {
             <div className="counter">
               <button
                 aria-label={t.fewerLines}
-                disabled={x <= LIMITS.x[0]}
+                disabled={x <= minX}
                 onClick={() => setState({ ...state, x: x - 1 })}
               >
                 −
@@ -307,7 +346,7 @@ export default function App() {
               {t.linesRevealed(lines.size, x)}
               <button
                 aria-label={t.moreLines}
-                disabled={x >= LIMITS.x[1]}
+                disabled={x >= maxX}
                 onClick={() => setState({ ...state, x: x + 1 })}
               >
                 +
@@ -341,10 +380,10 @@ export default function App() {
               ))}
 
               {/* route being drawn */}
-              {(drag ?? click) && (
+              {(drag ?? click?.path) && (
                 <polyline
                   className="path draft"
-                  points={toPoints((drag ?? click)!)}
+                  points={toPoints((drag ?? click?.path)!)}
                 />
               )}
 
@@ -357,47 +396,49 @@ export default function App() {
                 }),
               )}
 
-              {/* clickable vertical segments between nodes: build a route, or unmark a no-line dot */}
+              {/* clickable vertical segments between nodes: start or extend a route */}
               {Array.from({ length: m + 1 }, (_, i) =>
                 Array.from({ length: n }, (_, c) => {
+                  // r is the row of the segment's upper node (-1 = below the start post)
                   const r = i - 1
-                  const k = key(r, c)
-                  const on = r >= 0 && empty.has(k)
+                  const next = clickSegment(click, r, c)
+                  const does = effect(next)
+                  if (!does) return null
                   return (
                     <rect
-                      key={k}
-                      className={`hit vhit ${on ? 'on' : ''}`}
+                      key={key(r, c)}
+                      className="hit vhit"
                       x={cx(c) - 10}
                       y={cy(r) + 10}
                       width={20}
                       height={GY - 20}
                       rx={6}
-                      onClick={() => clickSegment(r, c)}
+                      onClick={() => editDraft(next)}
                     >
-                      <title>{on && !click ? t.unmark : t.markEmpty}</title>
+                      <title>{does === 'undo' ? t.undoStep : click ? t.stepStraight : t.startRoute}</title>
                     </rect>
                   )
                 }),
               )}
 
-              {/* clickable gaps between dots */}
-              {Array.from({ length: m }, (_, r) =>
+              {/* clickable gaps between dots, while building a route: lines it can take or undo */}
+              {click && Array.from({ length: m }, (_, r) =>
                 Array.from({ length: n - 1 }, (_, c) => {
-                  const k = key(r, c)
-                  const on = lines.has(k)
-                  const conflict = !on && lineConflict(r, c)
+                  const next = clickLine(click, r, c)
+                  const does = effect(next)
+                  if (!does) return null
                   return (
                     <rect
-                      key={k}
-                      className={`hit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
+                      key={key(r, c)}
+                      className="hit"
                       x={cx(c) + 10}
                       y={cy(r) - 18}
                       width={GX - 20}
                       height={36}
                       rx={6}
-                      onClick={() => toggleLine(r, c)}
+                      onClick={() => editDraft(next)}
                     >
-                      <title>{on ? t.removeLine : conflict ? t.lineConflict : t.revealLine}</title>
+                      <title>{does === 'undo' ? t.undoStep : t.stepAcross}</title>
                     </rect>
                   )
                 }),
@@ -422,7 +463,7 @@ export default function App() {
                         {tokens[s]!.toFixed(2)}
                       </text>
                     )}
-                    {!showTokens && result.ok && (
+                    {!showTokens && prob && (
                       <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
                         {pct(p)}
                       </text>
@@ -487,20 +528,21 @@ export default function App() {
               min={LIMITS.n[0]}
               max={LIMITS.n[1]}
               value={n}
-              onCommit={(v) => setState({ ...state, n: v })}
+              onCommit={(v) => resize({ n: v })}
             />
             <NumberField
               label={t.dotRows}
               min={LIMITS.m[0]}
               max={LIMITS.m[1]}
               value={m}
-              onCommit={(v) => setState({ ...state, m: v })}
+              onCommit={(v) => resize({ m: v })}
             />
             <NumberField
               label={t.totalLines}
-              min={LIMITS.x[0]}
-              max={LIMITS.x[1]}
+              min={minX}
+              max={maxX}
               value={x}
+              disabled={maxX <= minX}
               onCommit={(v) => setState({ ...state, x: v })}
             />
             <div className="buttons">
@@ -514,63 +556,54 @@ export default function App() {
 
           <section>
             <h2>{t.odds(dest + 1)}</h2>
-            {result.ok ? (
-              <>
-                <p className="meta">
-                  {t.summary(result.remaining, result.layouts, formatCount(result.layouts, lang))}
-                </p>
-                <ol className="bars">
-                  {probs.map((p, s) => (
-                    <li key={s} className={isPick(s) ? 'best' : ''}>
-                      <span className="name">{letter(s)}</span>
-                      <span className="bar">
-                        <span style={{ width: `${p * 100}%` }} />
-                      </span>
-                      <span className="val">{pct(p)}</span>
-                    </li>
-                  ))}
-                </ol>
-              </>
-            ) : (
-              <p className="error">
-                {result.error === 'tooManyLines' ? t.tooManyLines(lines.size, x) : t.noLayout}
-              </p>
-            )}
+            <p className="meta">
+              {t.summary(known.remaining, known.layouts, formatCount(known.layouts, lang))}
+            </p>
+            {!prob && <p className="meta">{t.computing}</p>}
+            <ol className="bars">
+              {probs.map((p, s) => (
+                <li key={s} className={isPick(s) ? 'best' : ''}>
+                  <span className="name">{letter(s)}</span>
+                  <span className="bar">
+                    <span style={{ width: `${p * 100}%` }} />
+                  </span>
+                  <span className="val">{pct(p)}</span>
+                </li>
+              ))}
+            </ol>
           </section>
 
-          {result.ok && (
-            <section>
-              <h2>{t.fullMatrix}</h2>
-              <table className="matrix">
-                <thead>
-                  <tr>
-                    <th />
-                    {Array.from({ length: n }, (_, d) => (
-                      <th key={d} className={d === dest ? 'sel' : ''}>
-                        {d + 1}
-                      </th>
+          <section>
+            <h2>{t.fullMatrix}</h2>
+            <table className="matrix">
+              <thead>
+                <tr>
+                  <th />
+                  {Array.from({ length: n }, (_, d) => (
+                    <th key={d} className={d === dest ? 'sel' : ''}>
+                      {d + 1}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(prob ?? []).map((row, s) => (
+                  <tr key={s}>
+                    <th>{letter(s)}</th>
+                    {row.map((p, d) => (
+                      <td
+                        key={d}
+                        className={d === dest ? 'sel' : ''}
+                        style={{ background: `rgba(56, 214, 255, ${p * 0.55})` }}
+                      >
+                        {Math.round(p * 100)}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.prob.map((row, s) => (
-                    <tr key={s}>
-                      <th>{letter(s)}</th>
-                      {row.map((p, d) => (
-                        <td
-                          key={d}
-                          className={d === dest ? 'sel' : ''}
-                          style={{ background: `rgba(56, 214, 255, ${p * 0.55})` }}
-                        >
-                          {Math.round(p * 100)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </section>
 
           <section className="notes">
             <h2>{t.assumptions}</h2>

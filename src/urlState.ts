@@ -1,11 +1,23 @@
 // All app state lives in the query string, e.g.
-//   ?n=6&m=5&x=9&l=3.0,4.0&e=0.0,1.0,2.0&p=0&d=0
-// n columns, m dot rows, x total lines, l revealed lines ("row.col"),
-// e dots known to have no line ("row.col"), p played/traced starts,
+//   ?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0
+// n columns, m dot rows, x total lines, l revealed lines ("row.col"), p played/traced starts,
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
-import { key, parseKey } from './solver.ts'
+import {
+  analyzePrepared,
+  countLayouts,
+  key,
+  lineDots,
+  maxLines,
+  oddsCost,
+  parseKey,
+  playable,
+  prepare,
+  trace,
+  type Board,
+  type Trace,
+} from './solver.ts'
 
 export type Strategy = 'gambler' | 'mathematician'
 
@@ -14,14 +26,13 @@ export type State = {
   m: number
   x: number
   lines: string[]
-  empty: string[]
   played: number[]
   dest: number
   lang: Lang
   strategy: Strategy
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
+export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
@@ -39,40 +50,117 @@ export function normalize(s: State): State {
   for (const k of s.lines) {
     const [r, c] = parseKey(k)
     if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n - 1)) continue
-    const a = key(r, c)
-    const b = key(r, c + 1)
-    if (ends.has(a) || ends.has(b)) continue // shares an endpoint: invalid
-    ends.add(a).add(b)
-    lines.push(a)
+    const k2 = key(r, c)
+    const dots = lineDots(k2)
+    if (dots.some((d) => ends.has(d))) continue // shares an endpoint: invalid
+    dots.forEach((d) => ends.add(d))
+    lines.push(k2)
   }
-  // a dot can't be both a line endpoint and empty
-  const empty = new Set<string>()
-  for (const k of s.empty) {
-    const [r, c] = parseKey(k)
-    if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n)) continue
-    const d = key(r, c)
-    if (!ends.has(d)) empty.add(d)
-  }
+  // a fixed order, so the same lines always save (and compare) the same
+  lines.sort((a, b) => {
+    const [ra, ca] = parseKey(a)
+    const [rb, cb] = parseKey(b)
+    return ra - rb || ca - cb
+  })
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  return { n, m, x, lines, empty: [...empty], played, dest: Math.min(s.dest, n - 1), lang: s.lang, strategy: s.strategy }
+  return {
+    n,
+    m,
+    x,
+    lines,
+    played,
+    dest: Math.min(s.dest, n - 1),
+    lang: s.lang,
+    strategy: s.strategy,
+  }
 }
 
-export function read(search: string): State {
+// What a state's traced routes prove, and the odds they leave for the hidden lines.
+export type Known = {
+  board: Board // x capped to what the board can hold
+  lines: Set<string>
+  traces: Trace[]
+  ends: Set<string> // dots a line joins
+  blocked: Set<string> // dots a route passes straight through, so they have no line
+  layouts: number // layouts of the hidden lines consistent with the board (at least 1)
+  remaining: number // hidden lines still to place
+  // prob[s][d] = P(start s ends at destination d); null when it's too slow to work out here,
+  // and the page computes it in a worker instead
+  prob: number[][] | null
+}
+
+// Above this oddsCost the odds are left to a worker (about 10 ms of work at this level).
+const ODDS_SYNC_COST = 200_000
+
+// null when the routes are impossible: no layout of the x lines agrees with them.
+// Lines are only known from traced routes, so the returned state keeps just the lines some
+// route crosses. A line no route crosses never touches a route's dots, so dropping it leaves
+// every route as is, and the traces made with it still hold.
+export function derive(s: State): { state: State; known: Known } | null {
+  const board = { n: s.n, m: s.m, x: Math.min(s.x, maxLines(s.n, s.m)) }
+  const all = new Set(s.lines)
+  const traces = s.played.map((p) => trace(board, all, p))
+  const used = new Set(traces.flatMap((t) => t.lines))
+  const state = used.size === s.lines.length ? s : { ...s, lines: s.lines.filter((l) => used.has(l)) }
+  const lines = new Set(state.lines)
+  const ends = new Set(state.lines.flatMap(lineDots))
+  const blocked = new Set(traces.flatMap((t) => t.straight))
+  const p = prepare(board, lines, blocked)
+  const layouts = countLayouts(p)
+  if (!layouts) return null
+  const odds = oddsCost(p) <= ODDS_SYNC_COST ? analyzePrepared(p) : null
+  const prob = odds?.ok ? odds.prob : null
+  return { state, known: { board, lines, traces, ends, blocked, layouts, remaining: p.remaining, prob } }
+}
+
+// Whether two states have the same board and routes, so the same Known.
+export const sameBoard = (a: State, b: State) =>
+  a.n === b.n &&
+  a.m === b.m &&
+  a.x === b.x &&
+  a.lines.join() === b.lines.join() &&
+  a.played.join() === b.played.join()
+
+// `dropped` is set when the link held something that isn't kept as given: lines no route
+// crosses or that overlap, the retired `e` (no-line dots) param, out-of-range values, or
+// routes that are impossible (which load as an empty board).
+export type Loaded = { state: State; known: Known; dropped: boolean }
+
+export function read(search: string): Loaded {
   const q = new URLSearchParams(search)
   const list = (k: string) => (q.get(k) ?? '').split(',').filter(Boolean)
   const n = int(q.get('n'), DEFAULT.n, ...LIMITS.n)
   const m = int(q.get('m'), DEFAULT.m, ...LIMITS.m)
-  return normalize({
+  const lines = list('l')
+  const played = list('p').map(Number)
+  const s = normalize({
     n,
     m,
     x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
-    lines: list('l'),
-    empty: list('e'),
-    played: list('p').map(Number),
+    lines,
+    played,
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
+  // A board shape that can't be played even empty (every column needs a line, e.g. 5
+  // columns on 1 row) loads the default board; a playable one whose routes can't happen
+  // keeps its settings but loads empty.
+  if (!playable(s.n, s.m, s.x)) return { ...derive({ ...DEFAULT, lang: s.lang, strategy: s.strategy })!, dropped: true }
+  const d = derive(s)
+  if (!d) return { ...derive({ ...s, lines: [], played: [] })!, dropped: true }
+  const { state } = d
+  // a number param that was out of range (or not a number) and so was clamped
+  const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)
+  const dropped =
+    list('e').length > 0 ||
+    state.lines.length < lines.length ||
+    state.played.length < played.length ||
+    clamped('n', state.n) ||
+    clamped('m', state.m) ||
+    clamped('x', state.x) ||
+    clamped('d', state.dest)
+  return { ...d, dropped }
 }
 
 export function write(s: State): string {
@@ -81,7 +169,6 @@ export function write(s: State): string {
   q.set('m', String(s.m))
   q.set('x', String(s.x))
   if (s.lines.length) q.set('l', s.lines.join(','))
-  if (s.empty.length) q.set('e', s.empty.join(','))
   if (s.played.length) q.set('p', s.played.join(','))
   q.set('d', String(s.dest))
   if (s.lang !== DEFAULT_LANG) q.set('lang', s.lang)

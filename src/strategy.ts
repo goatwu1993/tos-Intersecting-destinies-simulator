@@ -16,6 +16,12 @@ export type Expected =
   // (null for starts already traced).
   | { ok: true; reached: boolean; perStart: (number | null)[]; best: number }
 
+const popcount = (v: number) => {
+  let k = 0
+  for (; v; v &= v - 1) k++
+  return k
+}
+
 export function expectedTokens(
   board: Board,
   lines: Set<string>,
@@ -32,19 +38,27 @@ export function expectedTokens(
   }
 
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
-  // most hidden lines the rows from r on can still take
+  // most hidden lines the rows from r on can still take, the columns their lines could touch,
+  // and the columns their revealed lines touch anyway (a row's first option has no hidden lines)
   const capacity = new Array<number>(m + 1).fill(0)
-  for (let r = m - 1; r >= 0; r--) capacity[r] = capacity[r + 1] + Math.max(...rows[r].map((o) => o.k))
+  const reach = new Array<number>(m + 1).fill(0)
+  const revealed = new Array<number>(m + 1).fill(0)
+  for (let r = m - 1; r >= 0; r--) {
+    capacity[r] = capacity[r + 1] + Math.max(...rows[r].map((o) => o.k))
+    reach[r] = rows[r].reduce((a, o) => a | o.moved, reach[r + 1])
+    revealed[r] = revealed[r + 1] | rows[r][0].moved
+  }
 
   // Per layout and start: the column it ends in and a base-3 signature of its path
   // (left / straight / right per row). Equal signatures mean the same revealed path.
   const end = new Int8Array(layoutCount * n)
   const sig = new Int32Array(layoutCount * n)
   let count = 0
-  const allCovered = (1 << n) - 1
-  const rec = (r: number, used: number, cover: number, cur: number[], sg: number[]) => {
+  // touched: columns some line touches; every column needs one
+  const all = (1 << n) - 1
+  const rec = (r: number, used: number, touched: number, cur: number[], sg: number[]) => {
     if (r === m) {
-      if (used !== remaining || cover !== allCovered) return
+      if (used !== remaining || touched !== all) return
       for (let s = 0; s < n; s++) {
         end[count * n + s] = cur[s]
         sig[count * n + s] = sg[s]
@@ -53,17 +67,22 @@ export function expectedTokens(
       return
     }
     if (used + capacity[r] < remaining) return
+    // every column needs a line: give up once the rows left can't reach an untouched column,
+    // or have too few hidden lines left (each covers two columns) for the ones only they can
+    if ((touched | reach[r]) !== all) return
+    if (2 * (remaining - used) < popcount(all & ~(touched | revealed[r]))) return
     for (const o of rows[r]) {
       if (used + o.k > remaining) continue
       rec(
         r + 1,
         used + o.k,
-        cover | o.cover,
+        touched | o.moved,
         cur.map((c) => o.map[c]),
         sg.map((v, s) => v * 3 + (o.map[cur[s]] - cur[s] + 1)),
       )
     }
   }
+  // revealed lines are in every option of their row, so they mark their columns as they go
   rec(0, 0, 0, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
 
   // set: layouts still consistent; mask: starts already traced.
@@ -89,10 +108,10 @@ export function expectedTokens(
     return min
   }
 
-  const all = Array.from({ length: count }, (_, i) => i)
+  const layouts = Array.from({ length: count }, (_, i) => i)
   const mask = played.reduce((a, s) => a | (1 << s), 0)
   const unplayed = n - played.length
-  const perStart = Array.from({ length: n }, (_, s) => (mask & (1 << s) ? null : value(all, mask, s, unplayed)))
+  const perStart = Array.from({ length: n }, (_, s) => (mask & (1 << s) ? null : value(layouts, mask, s, unplayed)))
   const finite = perStart.filter((v): v is number => v !== null)
   return { ok: true, reached: false, perStart, best: finite.length ? Math.min(...finite) : 0 }
 }
