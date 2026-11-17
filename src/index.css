@@ -104,6 +104,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-bottom: 16px;
 }
 .counter button {
   padding: 0 8px;
