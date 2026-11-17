@@ -194,148 +194,150 @@ export default function App() {
       </header>
 
       <div className="layout">
-        <div className="board-wrap">
-          <div className="board-bar">
-            <button onClick={resetBoard}>{t.reset}</button>
-          </div>
-          <div className="counter">
-            {t.linesRevealed(lines.size, x)}
-          </div>
-          <svg
-            ref={svgRef}
-            className={`board ${drag ? 'dragging' : ''}`}
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerCancel={(e) => e.pointerId === pointer.current?.id && endDrag()}
-            viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
-            {/* column tracks */}
-            {Array.from({ length: n }, (_, c) => (
-              <line key={c} className="track" x1={cx(c)} y1={cy(-1)} x2={cx(c)} y2={cy(m)} />
-            ))}
+        <div className="main">
+          <div className="board-wrap">
+            <div className="board-bar">
+              <button onClick={resetBoard}>{t.reset}</button>
+            </div>
+            <div className="counter">
+              {t.linesRevealed(lines.size, x)}
+            </div>
+            <svg
+              ref={svgRef}
+              className={`board ${drag ? 'dragging' : ''}`}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerCancel={(e) => e.pointerId === pointer.current?.id && endDrag()}
+              viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
+              {/* column tracks */}
+              {Array.from({ length: n }, (_, c) => (
+                <line key={c} className="track" x1={cx(c)} y1={cy(-1)} x2={cx(c)} y2={cy(m)} />
+              ))}
 
-            {/* revealed lines */}
-            {state.lines.map((k) => {
-              const [r, c] = parseKey(k)
-              return <line key={k} className="rung" x1={cx(c)} y1={cy(r)} x2={cx(c + 1)} y2={cy(r)} />
-            })}
+              {/* revealed lines */}
+              {state.lines.map((k) => {
+                const [r, c] = parseKey(k)
+                return <line key={k} className="rung" x1={cx(c)} y1={cy(r)} x2={cx(c + 1)} y2={cy(r)} />
+              })}
 
-            {/* traced paths */}
-            {traces.map((t, i) => (
-              <polyline
-                key={played[i]}
-                className="path"
-                points={toPoints(t.points)}
-              />
-            ))}
+              {/* traced paths */}
+              {traces.map((t, i) => (
+                <polyline
+                  key={played[i]}
+                  className="path"
+                  points={toPoints(t.points)}
+                />
+              ))}
 
-            {/* route being drawn */}
-            {drag && (
-              <polyline
-                className="path draft"
-                points={toPoints(drag)}
-              />
-            )}
+              {/* route being drawn */}
+              {drag && (
+                <polyline
+                  className="path draft"
+                  points={toPoints(drag)}
+                />
+              )}
 
-            {/* dots */}
-            {Array.from({ length: m }, (_, r) =>
-              Array.from({ length: n }, (_, c) => {
-                const k = key(r, c)
-                const cls = lineEnds.has(k) ? 'dot end' : blocked.has(k) ? 'dot empty' : 'dot'
-                return <circle key={k} className={cls} cx={cx(c)} cy={cy(r)} r={6} />
-              }),
-            )}
+              {/* dots */}
+              {Array.from({ length: m }, (_, r) =>
+                Array.from({ length: n }, (_, c) => {
+                  const k = key(r, c)
+                  const cls = lineEnds.has(k) ? 'dot end' : blocked.has(k) ? 'dot empty' : 'dot'
+                  return <circle key={k} className={cls} cx={cx(c)} cy={cy(r)} r={6} />
+                }),
+              )}
 
-            {/* clickable vertical segments: mark a dot as having no line */}
-            {Array.from({ length: m }, (_, r) =>
-              Array.from({ length: n }, (_, c) => {
-                const k = key(r, c)
-                const on = empty.has(k)
-                const conflict = !on && lineEnds.has(k)
+              {/* clickable vertical segments: mark a dot as having no line */}
+              {Array.from({ length: m }, (_, r) =>
+                Array.from({ length: n }, (_, c) => {
+                  const k = key(r, c)
+                  const on = empty.has(k)
+                  const conflict = !on && lineEnds.has(k)
+                  return (
+                    <rect
+                      key={k}
+                      className={`hit vhit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
+                      x={cx(c) - 10}
+                      y={cy(r) - GY / 2 + 2}
+                      width={20}
+                      height={GY - 4}
+                      rx={6}
+                      onClick={() => toggleEmpty(r, c)}
+                    >
+                      <title>{on ? t.unmark : conflict ? t.lineEndsHere : t.markEmpty}</title>
+                    </rect>
+                  )
+                }),
+              )}
+
+              {/* clickable gaps between dots */}
+              {Array.from({ length: m }, (_, r) =>
+                Array.from({ length: n - 1 }, (_, c) => {
+                  const k = key(r, c)
+                  const on = lines.has(k)
+                  const conflict = !on && lineConflict(r, c)
+                  return (
+                    <rect
+                      key={k}
+                      className={`hit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
+                      x={cx(c) + 10}
+                      y={cy(r) - 18}
+                      width={GX - 20}
+                      height={36}
+                      rx={6}
+                      onClick={() => toggleLine(r, c)}
+                    >
+                      <title>{on ? t.removeLine : conflict ? t.lineConflict : t.revealLine}</title>
+                    </rect>
+                  )
+                }),
+              )}
+
+              {/* starts */}
+              {Array.from({ length: n }, (_, s) => {
+                const p = probs[s]
+                const isBest = result.ok && p === best && best > 0
                 return (
-                  <rect
-                    key={k}
-                    className={`hit vhit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
-                    x={cx(c) - 10}
-                    y={cy(r) - GY / 2 + 2}
-                    width={20}
-                    height={GY - 4}
-                    rx={6}
-                    onClick={() => toggleEmpty(r, c)}
+                  <g
+                    key={s}
+                    className={`badge start ${played.includes(s) ? 'played' : ''} ${isBest ? 'best' : ''}`}
+                    onPointerDown={(e) => onStartDown(e, s)}
                   >
-                    <title>{on ? t.unmark : conflict ? t.lineEndsHere : t.markEmpty}</title>
-                  </rect>
-                )
-              }),
-            )}
-
-            {/* clickable gaps between dots */}
-            {Array.from({ length: m }, (_, r) =>
-              Array.from({ length: n - 1 }, (_, c) => {
-                const k = key(r, c)
-                const on = lines.has(k)
-                const conflict = !on && lineConflict(r, c)
-                return (
-                  <rect
-                    key={k}
-                    className={`hit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
-                    x={cx(c) + 10}
-                    y={cy(r) - 18}
-                    width={GX - 20}
-                    height={36}
-                    rx={6}
-                    onClick={() => toggleLine(r, c)}
-                  >
-                    <title>{on ? t.removeLine : conflict ? t.lineConflict : t.revealLine}</title>
-                  </rect>
-                )
-              }),
-            )}
-
-            {/* starts */}
-            {Array.from({ length: n }, (_, s) => {
-              const p = probs[s]
-              const isBest = result.ok && p === best && best > 0
-              return (
-                <g
-                  key={s}
-                  className={`badge start ${played.includes(s) ? 'played' : ''} ${isBest ? 'best' : ''}`}
-                  onPointerDown={(e) => onStartDown(e, s)}
-                >
-                  <circle cx={cx(s)} cy={cy(-1) - 26} r={18} />
-                  <text x={cx(s)} y={cy(-1) - 26} dy="0.35em">
-                    {letter(s)}
-                  </text>
-                  {result.ok && (
-                    <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
-                      {pct(p)}
+                    <circle cx={cx(s)} cy={cy(-1) - 26} r={18} />
+                    <text x={cx(s)} y={cy(-1) - 26} dy="0.35em">
+                      {letter(s)}
                     </text>
-                  )}
-                  <circle className="post" cx={cx(s)} cy={cy(-1)} r={7} />
-                </g>
-              )
-            })}
+                    {result.ok && (
+                      <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
+                        {pct(p)}
+                      </text>
+                    )}
+                    <circle className="post" cx={cx(s)} cy={cy(-1)} r={7} />
+                  </g>
+                )
+              })}
 
-            {/* destinations */}
-            {Array.from({ length: n }, (_, d) => (
-              <g
-                key={d}
-                className={`badge dest ${d === dest ? 'selected' : ''}`}
-                onClick={() => setState({ ...state, dest: d })}
-              >
-                <circle className="post" cx={cx(d)} cy={cy(m)} r={7} />
-                <rect x={cx(d) - 18} y={cy(m) + 16} width={36} height={36} rx={6} />
-                <text x={cx(d)} y={cy(m) + 34} dy="0.35em">
-                  {d + 1}
-                </text>
-              </g>
-            ))}
-          </svg>
+              {/* destinations */}
+              {Array.from({ length: n }, (_, d) => (
+                <g
+                  key={d}
+                  className={`badge dest ${d === dest ? 'selected' : ''}`}
+                  onClick={() => setState({ ...state, dest: d })}
+                >
+                  <circle className="post" cx={cx(d)} cy={cy(m)} r={7} />
+                  <rect x={cx(d) - 18} y={cy(m) + 16} width={36} height={36} rx={6} />
+                  <text x={cx(d)} y={cy(m) + 34} dy="0.35em">
+                    {d + 1}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          </div>
           <ul className="rules">
             {t.rules.map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
-        </div>
+          </div>
 
         <aside className="panel">
           <section>
