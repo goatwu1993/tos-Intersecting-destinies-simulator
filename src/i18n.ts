@@ -31,6 +31,8 @@ const en = {
   stepAcross: 'Route: take this line',
   impossible: 'Not saved: no layout of the lines agrees with that.',
   contradicts: 'Not saved: this route contradicts a route already traced.',
+  shape: 'Not saved: every column needs a line, and this board can’t hold enough lines for that (n columns need at least ⌈n / 2⌉ lines).',
+  drawRoute: 'To trace a start, drag from it all the way to a destination, or click its route out segment by segment.',
   adjusted:
     'This link had parts that couldn’t be kept (lines no traced route crosses or that overlap, no-line dots, out-of-range values, or impossible routes); they were removed or corrected.',
   board: 'Board',
@@ -90,6 +92,8 @@ const zh: Messages = {
   stepAcross: '路線：走這條橫線',
   impossible: '未儲存：沒有任何橫線排列符合此狀態。',
   contradicts: '未儲存：此路線與已追蹤的路線矛盾。',
+  shape: '未儲存：每條直線都需要至少一條橫線，但此盤面放不下足夠的橫線（n 條直線至少需要 ⌈n / 2⌉ 條橫線）。',
+  drawRoute: '要追蹤起點，請從起點一路拖曳到終點，或逐段點擊畫出路線。',
   adjusted: '此連結含有無法保留的內容（沒有路線經過或彼此重疊的橫線、無橫線點、超出範圍的數值或不可能的路線），已移除或修正。',
   board: '盤面',
   presets: '預設關卡',

@@ -25,6 +25,7 @@ export const lineDots = (line: string) => {
 export const maxLines = (n: number, m: number) => m * Math.floor(n / 2)
 
 export type Trace = {
+  start: number
   end: number
   // polyline in grid coords: row -1 = start post, row m = destination post
   points: [number, number][]
@@ -54,7 +55,7 @@ export function trace(board: Board, lines: Set<string>, start: number): Trace {
     }
   }
   points.push([m, c])
-  return { end: c, points, straight, lines: used }
+  return { start, end: c, points, straight, lines: used }
 }
 
 // Each option for a row: how many unknown lines it adds, the resulting column mapping, and
@@ -114,42 +115,72 @@ export type Analysis =
       prob: number[][]
     }
 
-// Bit c is set if a line in `lines` touches column c.
-export const touchedColumns = (lines: Iterable<string>) => {
-  let mask = 0
-  for (const k of lines) {
-    const c = parseKey(k)[1]
-    mask |= 3 << c
-  }
-  return mask
+// Every column needs a line, which the board can only hold if its (capped) x lines can cover
+// all n columns: ceil(n / 2) lines, e.g. not 5 columns on a single row. Any x from there up
+// to the board's capacity can then cover them.
+export const playable = (n: number, m: number, x: number) => Math.min(x, maxLines(n, m)) >= Math.ceil(n / 2)
+
+// What the counts below share: each row's options, the columns no revealed line touches yet
+// (bit c), and how many hidden lines are left to place.
+export type Prepared = { n: number; rows: RowOption[][]; free: number; remaining: number }
+
+export function prepare(board: Board, lines: Set<string>, blocked: Set<string>): Prepared {
+  const { n, m, x } = board
+  const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
+  // revealed lines are in every option of their row, including the first (no hidden lines)
+  const revealed = rows.reduce((a, opts) => a | opts[0].moved, 0)
+  return { n, rows, free: ~revealed & ((1 << n) - 1), remaining: x - lines.size }
 }
 
-// blocked: dots known to have no line (passed straight through by a traced route)
-export function analyze(board: Board, lines: Set<string>, blocked: Set<string>): Analysis {
-  const { n, m, x } = board
-  const remaining = x - lines.size
-  if (remaining < 0) return { ok: false, error: 'tooManyLines' }
-
-  // Every column needs a line. By inclusion–exclusion over the columns no revealed line
-  // touches yet: valid = Σ over subsets S of them, (−1)^|S| × layouts touching none of S,
-  // i.e. using only row options that touch no column in S. Counts stay below 2^53 at these
-  // board sizes, so the alternating sum is exact.
-  const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
-  const free = ~touchedColumns(lines) & ((1 << n) - 1)
-  const final = new Float64Array(n * n)
-  for (let S = free; ; S = (S - 1) & free) {
-    const counts = count(n, rows.map((opts) => opts.filter((o) => !(o.moved & S))), remaining)
+// Every column needs a line. By inclusion–exclusion over the columns no revealed line
+// touches yet: valid = Σ over subsets S of them, (−1)^|S| × layouts touching none of S,
+// i.e. using only row options that touch no column in S. Counts stay below 2^53 at these
+// board sizes, so the alternating sum is exact.
+function sumOverSubsets(p: Prepared, term: (rows: RowOption[][]) => Float64Array): Float64Array {
+  let total: Float64Array | undefined
+  for (let S = p.free; ; S = (S - 1) & p.free) {
+    const v = term(p.rows.map((opts) => opts.filter((o) => !(o.moved & S))))
     const sign = popcount(S) % 2 ? -1 : 1
-    for (let i = 0; i < n * n; i++) final[i] += sign * counts[i]
-    if (S === 0) break
+    total ??= new Float64Array(v.length)
+    for (let i = 0; i < v.length; i++) total[i] += sign * v[i]
+    if (S === 0) return total
   }
+}
+
+// Number of layouts of the hidden lines consistent with the board; 0 when it's impossible.
+// Cheap (no start-to-end matrix), so it can check every edit on the main thread.
+export function countLayouts(p: Prepared): number {
+  if (p.remaining < 0) return 0
+  return sumOverSubsets(p, (rows) => {
+    let dp = new Float64Array(p.remaining + 1)
+    dp[0] = 1
+    for (const opts of rows) {
+      const next = new Float64Array(p.remaining + 1)
+      for (const o of opts) for (let u = 0; u + o.k <= p.remaining; u++) next[u + o.k] += dp[u]
+      dp = next
+    }
+    return dp.subarray(p.remaining)
+  })[0]
+}
+
+// Rough work for analyze(), to decide whether it can run without stalling the page.
+export const oddsCost = (p: Prepared) => (1 << popcount(p.free)) * p.rows.length * p.n * p.n
+
+// blocked: dots known to have no line (passed straight through by a traced route)
+export const analyze = (board: Board, lines: Set<string>, blocked: Set<string>) =>
+  analyzePrepared(prepare(board, lines, blocked))
+
+export function analyzePrepared(p: Prepared): Analysis {
+  const { n } = p
+  if (p.remaining < 0) return { ok: false, error: 'tooManyLines' }
+  const final = sumOverSubsets(p, (rows) => count(n, rows, p.remaining))
 
   // every layout sends start 0 somewhere, so its row sums to the layout count
   let layouts = 0
   for (let d = 0; d < n; d++) layouts += final[d]
   if (!layouts) return { ok: false, error: 'noLayout' }
   const prob = Array.from({ length: n }, (_, s) => Array.from({ length: n }, (_, d) => final[s * n + d] / layouts))
-  return { ok: true, layouts, remaining, prob }
+  return { ok: true, layouts, remaining: p.remaining, prob }
 }
 
 const popcount = (v: number) => {

@@ -4,7 +4,20 @@
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
-import { analyze, key, lineDots, maxLines, parseKey, trace, type Analysis, type Board, type Trace } from './solver.ts'
+import {
+  analyzePrepared,
+  countLayouts,
+  key,
+  lineDots,
+  maxLines,
+  oddsCost,
+  parseKey,
+  playable,
+  prepare,
+  trace,
+  type Board,
+  type Trace,
+} from './solver.ts'
 
 export type Strategy = 'gambler' | 'mathematician'
 
@@ -69,9 +82,15 @@ export type Known = {
   traces: Trace[]
   ends: Set<string> // dots a line joins
   blocked: Set<string> // dots a route passes straight through, so they have no line
-  played: number[] // the state's traced starts (same array while the board is unchanged)
-  result: Extract<Analysis, { ok: true }>
+  layouts: number // layouts of the hidden lines consistent with the board (at least 1)
+  remaining: number // hidden lines still to place
+  // prob[s][d] = P(start s ends at destination d); null when it's too slow to work out here,
+  // and the page computes it in a worker instead
+  prob: number[][] | null
 }
+
+// Above this oddsCost the odds are left to a worker (about 10 ms of work at this level).
+const ODDS_SYNC_COST = 200_000
 
 // null when the routes are impossible: no layout of the x lines agrees with them.
 // Lines are only known from traced routes, so the returned state keeps just the lines some
@@ -86,9 +105,12 @@ export function derive(s: State): { state: State; known: Known } | null {
   const lines = new Set(state.lines)
   const ends = new Set(state.lines.flatMap(lineDots))
   const blocked = new Set(traces.flatMap((t) => t.straight))
-  const result = analyze(board, lines, blocked)
-  if (!result.ok) return null
-  return { state, known: { board, lines, traces, ends, blocked, played: state.played, result } }
+  const p = prepare(board, lines, blocked)
+  const layouts = countLayouts(p)
+  if (!layouts) return null
+  const odds = oddsCost(p) <= ODDS_SYNC_COST ? analyzePrepared(p) : null
+  const prob = odds?.ok ? odds.prob : null
+  return { state, known: { board, lines, traces, ends, blocked, layouts, remaining: p.remaining, prob } }
 }
 
 // Whether two states have the same board and routes, so the same Known.
@@ -121,14 +143,12 @@ export function read(search: string): Loaded {
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
+  // A board shape that can't be played even empty (every column needs a line, e.g. 5
+  // columns on 1 row) loads the default board; a playable one whose routes can't happen
+  // keeps its settings but loads empty.
+  if (!playable(s.n, s.m, s.x)) return { ...derive({ ...DEFAULT, lang: s.lang, strategy: s.strategy })!, dropped: true }
   const d = derive(s)
-  if (!d) {
-    // A link whose routes can't happen keeps its settings but loads an empty board. Some
-    // shapes can't be played even empty (every column needs a line, e.g. 5 columns on one
-    // row), so those load the default board.
-    const fallback = derive({ ...s, lines: [], played: [] }) ?? derive({ ...DEFAULT, lang: s.lang, strategy: s.strategy })!
-    return { ...fallback, dropped: true }
-  }
+  if (!d) return { ...derive({ ...s, lines: [], played: [] })!, dropped: true }
   const { state } = d
   // a number param that was out of range (or not a number) and so was clamped
   const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)

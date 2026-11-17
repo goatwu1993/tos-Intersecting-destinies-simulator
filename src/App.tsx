@@ -3,7 +3,8 @@ import { LANGS, messages, type Lang } from './i18n.ts'
 import { clickLine, clickSegment, commit, complete, extend, removeRoute, type Draft, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
-import { key, maxLines, parseKey } from './solver.ts'
+import type { OddsInput } from './odds.worker.ts'
+import { key, maxLines, parseKey, playable } from './solver.ts'
 import { DEFAULT, LIMITS, derive, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
@@ -28,7 +29,7 @@ const formatCount = (v: number, lang: Lang) => {
 
 // Why the board isn't what was asked for: an edit no layout agrees with, a route that
 // contradicts one already traced, or a link that was cleaned up on load.
-type Notice = 'impossible' | 'contradicts' | 'adjusted'
+type Notice = 'impossible' | 'contradicts' | 'adjusted' | 'shape' | 'drawRoute'
 type Saved = { state: State; known: Known; notice: Notice | null }
 
 const load = (): Saved => {
@@ -124,8 +125,22 @@ export default function App() {
   const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
-  const { board, lines, ends: lineEnds, traces, blocked, result } = known
+  const { board, lines, ends: lineEnds, traces, blocked } = known
   const { x } = board
+
+  // Odds too slow to work out while handling an edit (big boards) come from a worker; until
+  // it answers, the board shows none. A stale answer is ignored by checking which Known it
+  // was for.
+  const [workerOdds, setWorkerOdds] = useState<{ known: Known; prob: number[][] | null } | null>(null)
+  useEffect(() => {
+    if (known.prob) return
+    const worker = new Worker(new URL('./odds.worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (e: MessageEvent<number[][] | null>) => setWorkerOdds({ known, prob: e.data })
+    const input: OddsInput = { board, lines: [...lines], blocked: [...blocked] }
+    worker.postMessage(input)
+    return () => worker.terminate()
+  }, [known])
+  const prob = known.prob ?? (workerOdds?.known === known ? workerOdds.prob : null)
 
   const math = strategy === 'mathematician'
   // The search can take a second on big boards, so it runs in a worker; changing the inputs
@@ -145,15 +160,15 @@ export default function App() {
       board,
       lines: [...lines],
       blocked: [...blocked],
-      played: known.played,
+      played: traces.map((t) => t.start),
       dest,
-      layoutCount: result.layouts,
+      layoutCount: known.layouts,
     }
     worker.postMessage(input)
     return () => worker.terminate()
-    // known (and so known.played) only changes with the board or routes, so other edits
-    // (language…) don't restart the search
-  }, [math, board, lines, blocked, known.played, dest, result])
+    // every input but dest comes from known, which only changes with the board or routes,
+    // so other edits (language…) don't restart the search
+  }, [math, known, dest])
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
@@ -163,7 +178,8 @@ export default function App() {
 
   // Routes are only drawn (dragged or clicked) in full; clicking a traced start removes its
   // route and what it revealed.
-  const untrace = (s: number) => played.includes(s) && setState(removeRoute(state, s))
+  // Tapping a start with no route can't trace it any more, so it says how to.
+  const untrace = (s: number) => (played.includes(s) ? setState(removeRoute(state, s)) : setNotice('drawRoute'))
   // There can't be fewer lines in total than are already revealed, or more than the board
   // holds. A board too small for the minimum shows its capacity, which can't be changed.
   const minX = Math.max(LIMITS.x[0], lines.size)
@@ -173,6 +189,10 @@ export default function App() {
   const resize = (size: { n: number } | { m: number }) => {
     const next = { ...state, ...size }
     if (next.n === n && next.m === m) return true
+    if (!playable(next.n, next.m, next.x)) {
+      setNotice('shape')
+      return false
+    }
     return setState({ ...next, lines: [], played: [] })
   }
   const resetBoard = () => {
@@ -250,6 +270,7 @@ export default function App() {
     if (!drag || e.pointerId !== pointer.current?.id) return
     if (drag[drag.length - 1][0] === m) saveRoute(drag)
     else if (!pointer.current.moved) untrace(drag[0][1])
+    else setNotice('drawRoute') // released short of the destination row
     endDrag()
   }
 
@@ -258,7 +279,7 @@ export default function App() {
     document.title = t.title
   }, [lang, t])
 
-  const probs = result.prob.map((row) => row[dest])
+  const probs = prob ? prob.map((row) => row[dest]) : []
   const best = probs.length ? Math.max(...probs) : 0
   const tokens = expected?.ok && !expected.reached ? expected.perStart : []
   const bestTokens = expected?.ok ? expected.best : 0
@@ -295,7 +316,7 @@ export default function App() {
               {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
-            {notice && <p className="error">{t[notice]}</p>}
+            {notice && <p className={notice === 'drawRoute' ? 'meta' : 'error'}>{t[notice]}</p>}
             <div className="presets">
               <div className="buttons" role="group" aria-label={t.presets}>
                 {LEVELS.map((l) => (
@@ -442,7 +463,7 @@ export default function App() {
                         {tokens[s]!.toFixed(2)}
                       </text>
                     )}
-                    {!showTokens && (
+                    {!showTokens && prob && (
                       <text className="prob" x={cx(s)} y={cy(-1) - 54} style={{ opacity: 0.45 + 0.55 * p }}>
                         {pct(p)}
                       </text>
@@ -536,8 +557,9 @@ export default function App() {
           <section>
             <h2>{t.odds(dest + 1)}</h2>
             <p className="meta">
-              {t.summary(result.remaining, result.layouts, formatCount(result.layouts, lang))}
+              {t.summary(known.remaining, known.layouts, formatCount(known.layouts, lang))}
             </p>
+            {!prob && <p className="meta">{t.computing}</p>}
             <ol className="bars">
               {probs.map((p, s) => (
                 <li key={s} className={isPick(s) ? 'best' : ''}>
@@ -565,7 +587,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {result.prob.map((row, s) => (
+                {(prob ?? []).map((row, s) => (
                   <tr key={s}>
                     <th>{letter(s)}</th>
                     {row.map((p, d) => (

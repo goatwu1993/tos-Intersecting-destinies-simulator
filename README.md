@@ -13,5 +13,6 @@ URL params: `n` columns, `m` dot rows, `x` total lines, `l` revealed lines as `r
 col and col+1), `p` traced starts (0-based), `d` selected destination (0-based), `lang` UI language
 (`zh-TW` by default, or `en-US`). Only lines a traced route crosses are kept, dots a route passes straight
 through are known to have no line, and a state no layout of the `x` lines agrees with is never saved
-(such a link loads an empty board).
+(such a link keeps its settings but loads an empty board, or the default board if its shape can't be played at
+all: every column needs a line, so n columns need at least ⌈n / 2⌉ lines).
 Example: `?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0`

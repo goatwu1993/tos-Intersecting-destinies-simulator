@@ -16,6 +16,12 @@ export type Expected =
   // (null for starts already traced).
   | { ok: true; reached: boolean; perStart: (number | null)[]; best: number }
 
+const popcount = (v: number) => {
+  let k = 0
+  for (; v; v &= v - 1) k++
+  return k
+}
+
 export function expectedTokens(
   board: Board,
   lines: Set<string>,
@@ -32,9 +38,16 @@ export function expectedTokens(
   }
 
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
-  // most hidden lines the rows from r on can still take
+  // most hidden lines the rows from r on can still take, the columns their lines could touch,
+  // and the columns their revealed lines touch anyway (a row's first option has no hidden lines)
   const capacity = new Array<number>(m + 1).fill(0)
-  for (let r = m - 1; r >= 0; r--) capacity[r] = capacity[r + 1] + Math.max(...rows[r].map((o) => o.k))
+  const reach = new Array<number>(m + 1).fill(0)
+  const revealed = new Array<number>(m + 1).fill(0)
+  for (let r = m - 1; r >= 0; r--) {
+    capacity[r] = capacity[r + 1] + Math.max(...rows[r].map((o) => o.k))
+    reach[r] = rows[r].reduce((a, o) => a | o.moved, reach[r + 1])
+    revealed[r] = revealed[r + 1] | rows[r][0].moved
+  }
 
   // Per layout and start: the column it ends in and a base-3 signature of its path
   // (left / straight / right per row). Equal signatures mean the same revealed path.
@@ -54,6 +67,10 @@ export function expectedTokens(
       return
     }
     if (used + capacity[r] < remaining) return
+    // every column needs a line: give up once the rows left can't reach an untouched column,
+    // or have too few hidden lines left (each covers two columns) for the ones only they can
+    if ((touched | reach[r]) !== all) return
+    if (2 * (remaining - used) < popcount(all & ~(touched | revealed[r]))) return
     for (const o of rows[r]) {
       if (used + o.k > remaining) continue
       rec(
