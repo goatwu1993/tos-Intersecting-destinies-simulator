@@ -59,7 +59,7 @@ const en = {
     'Hidden lines are equally likely to be any layout consistent with what you know: the ' +
     'revealed lines, and every dot known to have no line (shown hollow) because a traced ' +
     'route passes straight through it. Lines join adjacent columns on the same ' +
-    'row and never share a dot.',
+    'row and never share a dot, and every start changes track at least once (every column has a line).',
 }
 
 export type Messages = typeof en
@@ -111,7 +111,7 @@ const zh: Messages = {
   assumptionsBody:
     '未揭示的橫線會以相同機率出現在任何與已知資訊相符的排列中：已知資訊包含已揭示的橫線，' +
     '以及所有確定沒有橫線的點（以空心顯示）——即被已追蹤路線直行通過的點。' +
-    '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點。',
+    '橫線只連接同一列上相鄰的兩條直線，且不會共用同一個點；每個起點至少會轉換一次軌道（每條直線都至少連著一條橫線）。',
 }
 
 export const messages: Record<Lang, Messages> = { 'zh-TW': zh, 'en-US': en }

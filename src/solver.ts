@@ -2,6 +2,8 @@
 // - n columns (start A.. at top, destinations at bottom), m rows of dots in between.
 // - A horizontal line sits on dot row r and joins column c with column c+1; key "r.c".
 // - Two lines never share an endpoint (dot).
+// - Every start changes track at least once, i.e. every column has a line touching it
+//   (a start only goes straight down if no line touches its column).
 // - x lines exist in total; some are revealed, the rest are unknown.
 //
 // Unknown lines are assumed to be placed uniformly at random among all layouts
@@ -104,12 +106,55 @@ export type Analysis =
       prob: number[][]
     }
 
+// Bit c is set if a line in `lines` touches column c.
+export const touchedColumns = (lines: Iterable<string>) => {
+  let mask = 0
+  for (const k of lines) {
+    const c = parseKey(k)[1]
+    mask |= 3 << c
+  }
+  return mask
+}
+
 // blocked: dots known to have no line (passed straight through by a traced route)
 export function analyze(board: Board, lines: Set<string>, blocked: Set<string>): Analysis {
   const { n, m, x } = board
   const remaining = x - lines.size
   if (remaining < 0) return { ok: false, error: 'tooManyLines' }
 
+  // Every column needs a line. By inclusion–exclusion over the columns no revealed line
+  // touches yet: valid = Σ over subsets S of them, (−1)^|S| × layouts touching none of S,
+  // where a layout avoids S's columns by treating all their dots as blocked. Counts stay
+  // below 2^53 at these board sizes, so the alternating sum is exact.
+  const free = ~touchedColumns(lines) & ((1 << n) - 1)
+  const final = new Float64Array(n * n)
+  for (let S = free; ; S = (S - 1) & free) {
+    const avoid = new Set(blocked)
+    for (let c = 0; c < n; c++) if (S & (1 << c)) for (let r = 0; r < m; r++) avoid.add(key(r, c))
+    const counts = count(board, lines, avoid, remaining)
+    const sign = popcount(S) % 2 ? -1 : 1
+    for (let i = 0; i < n * n; i++) final[i] += sign * counts[i]
+    if (S === 0) break
+  }
+
+  // every layout sends start 0 somewhere, so its row sums to the layout count
+  let layouts = 0
+  for (let d = 0; d < n; d++) layouts += final[d]
+  if (!layouts) return { ok: false, error: 'noLayout' }
+  const prob = Array.from({ length: n }, (_, s) => Array.from({ length: n }, (_, d) => final[s * n + d] / layouts))
+  return { ok: true, layouts, remaining, prob }
+}
+
+const popcount = (v: number) => {
+  let k = 0
+  for (; v; v &= v - 1) k++
+  return k
+}
+
+// counts[start * n + end]: layouts of the `remaining` hidden lines (no column rule) that take
+// start to end.
+function count(board: Board, lines: Set<string>, blocked: Set<string>, remaining: number): Float64Array {
+  const { n, m } = board
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
 
   // dp[used][start * n + pos] = number of partial layouts using `used` hidden lines
@@ -133,11 +178,5 @@ export function analyze(board: Board, lines: Set<string>, blocked: Set<string>):
     dp = next
   }
 
-  const final = dp[R]
-  // every layout sends start 0 somewhere, so its row sums to the layout count
-  let layouts = 0
-  for (let d = 0; d < n; d++) layouts += final[d]
-  if (!layouts) return { ok: false, error: 'noLayout' }
-  const prob = Array.from({ length: n }, (_, s) => Array.from({ length: n }, (_, d) => final[s * n + d] / layouts))
-  return { ok: true, layouts, remaining, prob }
+  return dp[R]
 }

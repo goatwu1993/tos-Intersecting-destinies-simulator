@@ -5,7 +5,7 @@
 // average to land on the target destination follows from a game-tree search: pick a start,
 // split the layouts by the path it revealed, and recurse on the groups that missed.
 
-import { rowOptions, trace, type Board } from './solver.ts'
+import { rowOptions, touchedColumns, trace, type Board } from './solver.ts'
 
 export const MAX_LAYOUTS = 200_000
 
@@ -41,9 +41,11 @@ export function expectedTokens(
   const end = new Int8Array(layoutCount * n)
   const sig = new Int32Array(layoutCount * n)
   let count = 0
-  const rec = (r: number, used: number, cur: number[], sg: number[]) => {
+  // touched: columns some line touches; every column needs one
+  const all = (1 << n) - 1
+  const rec = (r: number, used: number, touched: number, cur: number[], sg: number[]) => {
     if (r === m) {
-      if (used !== remaining) return
+      if (used !== remaining || touched !== all) return
       for (let s = 0; s < n; s++) {
         end[count * n + s] = cur[s]
         sig[count * n + s] = sg[s]
@@ -54,15 +56,19 @@ export function expectedTokens(
     if (used + capacity[r] < remaining) return
     for (const o of rows[r]) {
       if (used + o.k > remaining) continue
+      // a line moves both its columns, so the columns this row maps elsewhere are touched
+      let t = touched
+      for (let c = 0; c < n; c++) if (o.map[c] !== c) t |= 1 << c
       rec(
         r + 1,
         used + o.k,
+        t,
         cur.map((c) => o.map[c]),
         sg.map((v, s) => v * 3 + (o.map[cur[s]] - cur[s] + 1)),
       )
     }
   }
-  rec(0, 0, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
+  rec(0, 0, touchedColumns(lines) & all, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
 
   // set: layouts still consistent; mask: starts already traced.
   const value = (set: number[], mask: number, s: number, unplayed: number): number => {
@@ -87,10 +93,10 @@ export function expectedTokens(
     return min
   }
 
-  const all = Array.from({ length: count }, (_, i) => i)
+  const layouts = Array.from({ length: count }, (_, i) => i)
   const mask = played.reduce((a, s) => a | (1 << s), 0)
   const unplayed = n - played.length
-  const perStart = Array.from({ length: n }, (_, s) => (mask & (1 << s) ? null : value(all, mask, s, unplayed)))
+  const perStart = Array.from({ length: n }, (_, s) => (mask & (1 << s) ? null : value(layouts, mask, s, unplayed)))
   const finite = perStart.filter((v): v is number => v !== null)
   return { ok: true, reached: false, perStart, best: finite.length ? Math.min(...finite) : 0 }
 }
