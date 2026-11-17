@@ -1,11 +1,10 @@
 // All app state lives in the query string, e.g.
-//   ?n=6&m=5&x=9&l=3.0,4.0&e=0.0,1.0,2.0&p=0&d=0
-// n columns, m dot rows, x total lines, l revealed lines ("row.col"),
-// e dots known to have no line ("row.col"), p played/traced starts,
+//   ?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0
+// n columns, m dot rows, x total lines, l revealed lines ("row.col"), p played/traced starts,
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
-import { key, parseKey } from './solver.ts'
+import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
 
 export type Strategy = 'gambler' | 'mathematician'
 
@@ -14,14 +13,13 @@ export type State = {
   m: number
   x: number
   lines: string[]
-  empty: string[]
   played: number[]
   dest: number
   lang: Lang
   strategy: Strategy
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
+export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
@@ -45,16 +43,29 @@ export function normalize(s: State): State {
     ends.add(a).add(b)
     lines.push(a)
   }
-  // a dot can't be both a line endpoint and empty
-  const empty = new Set<string>()
-  for (const k of s.empty) {
-    const [r, c] = parseKey(k)
-    if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n)) continue
-    const d = key(r, c)
-    if (!ends.has(d)) empty.add(d)
-  }
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  return { n, m, x, lines, empty: [...empty], played, dest: Math.min(s.dest, n - 1), lang: s.lang, strategy: s.strategy }
+  // Lines are only known from traced routes, so keep just the ones some route crosses. A line
+  // no route crosses never touches a route's dots, so dropping it leaves every route as is.
+  const all = new Set(lines)
+  const used = new Set(played.flatMap((p) => trace(s, all, p).lines))
+  return {
+    n,
+    m,
+    x,
+    lines: lines.filter((l) => used.has(l)),
+    played,
+    dest: Math.min(s.dest, n - 1),
+    lang: s.lang,
+    strategy: s.strategy,
+  }
+}
+
+// Whether the traced routes are possible: some layout of the x lines agrees with them.
+export function possible(s: State): boolean {
+  const board = { n: s.n, m: s.m, x: Math.min(s.x, maxLines(s.n, s.m)) }
+  const lines = new Set(s.lines)
+  const blocked = new Set(s.played.flatMap((p) => trace(board, lines, p).straight))
+  return analyze(board, lines, blocked).ok
 }
 
 export function read(search: string): State {
@@ -62,17 +73,18 @@ export function read(search: string): State {
   const list = (k: string) => (q.get(k) ?? '').split(',').filter(Boolean)
   const n = int(q.get('n'), DEFAULT.n, ...LIMITS.n)
   const m = int(q.get('m'), DEFAULT.m, ...LIMITS.m)
-  return normalize({
+  const s = normalize({
     n,
     m,
     x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
     lines: list('l'),
-    empty: list('e'),
     played: list('p').map(Number),
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
+  // a link whose routes can't happen keeps its settings but loads an empty board
+  return possible(s) ? s : { ...s, lines: [], played: [] }
 }
 
 export function write(s: State): string {
@@ -81,7 +93,6 @@ export function write(s: State): string {
   q.set('m', String(s.m))
   q.set('x', String(s.x))
   if (s.lines.length) q.set('l', s.lines.join(','))
-  if (s.empty.length) q.set('e', s.empty.join(','))
   if (s.played.length) q.set('p', s.played.join(','))
   q.set('d', String(s.dest))
   if (s.lang !== DEFAULT_LANG) q.set('lang', s.lang)

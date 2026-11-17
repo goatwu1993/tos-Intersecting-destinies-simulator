@@ -1,4 +1,4 @@
-import { key, parseKey, trace } from './solver.ts'
+import { key, parseKey } from './solver.ts'
 import type { State } from './urlState.ts'
 
 // A drawn route is a list of grid nodes [row, col]; row -1 is the start post, row m the destination post.
@@ -38,7 +38,6 @@ const touches = (line: string, dot: string) => {
 // marked as traced, which already implies the dots it passes straight through.
 export function commit(state: State, path: Node[]): State {
   let lines = [...state.lines]
-  const empty = new Set(state.empty)
   for (let i = 0; i < path.length; i++) {
     const [r, c] = path[i]
     if (r < 0 || r >= state.m) continue
@@ -50,7 +49,6 @@ export function commit(state: State, path: Node[]): State {
       const ends = [key(r, c), key(r, next[1])]
       lines = lines.filter((l) => l === k || !ends.some((d) => touches(l, d)))
       if (!lines.includes(k)) lines.push(k)
-      ends.forEach((d) => empty.delete(d))
     } else if (next) {
       const d = key(r, c)
       lines = lines.filter((l) => !touches(l, d))
@@ -58,23 +56,11 @@ export function commit(state: State, path: Node[]): State {
   }
   const start = path[0][1]
   const played = state.played.includes(start) ? state.played : [...state.played, start]
-  return { ...state, lines, empty: [...empty], played }
+  return { ...state, lines, played }
 }
 
-// Remove a traced route along with what it revealed: its lines and its no-line dots,
-// unless another traced route still goes through them.
+// Remove a traced route. Saving the state drops the lines no remaining route crosses,
+// so whatever only this route revealed goes with it.
 export function removeRoute(state: State, start: number): State {
-  const lines = new Set(state.lines)
-  const t = trace(state, lines, start)
-  const others = state.played.filter((p) => p !== start).map((p) => trace(state, lines, p))
-  const keepLines = new Set(others.flatMap((o) => o.lines))
-  const keepDots = new Set(others.flatMap((o) => o.straight))
-  const dropLines = new Set(t.lines.filter((l) => !keepLines.has(l)))
-  const dropDots = new Set(t.straight.filter((d) => !keepDots.has(d)))
-  return {
-    ...state,
-    lines: state.lines.filter((l) => !dropLines.has(l)),
-    empty: state.empty.filter((d) => !dropDots.has(d)),
-    played: state.played.filter((p) => p !== start),
-  }
+  return { ...state, played: state.played.filter((p) => p !== start) }
 }

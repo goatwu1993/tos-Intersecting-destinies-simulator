@@ -6,7 +6,7 @@
 //
 // Unknown lines are assumed to be placed uniformly at random among all layouts
 // consistent with what is known: the revealed lines, plus every dot known to
-// have no line (marked empty, or passed straight through by a traced path).
+// have no line (passed straight through by a traced route).
 
 export type Board = { n: number; m: number; x: number }
 
@@ -104,7 +104,7 @@ export type Analysis =
       prob: number[][]
     }
 
-// blocked: dots known to have no line (marked empty, or passed straight through by a traced route)
+// blocked: dots known to have no line (passed straight through by a traced route)
 export function analyze(board: Board, lines: Set<string>, blocked: Set<string>): Analysis {
   const { n, m, x } = board
   const remaining = x - lines.size

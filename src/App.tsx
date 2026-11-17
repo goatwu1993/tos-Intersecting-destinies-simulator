@@ -4,7 +4,7 @@ import { commit, extend, removeRoute, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
 import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
-import { DEFAULT, LIMITS, normalize, read, write, type State } from './urlState.ts'
+import { DEFAULT, LIMITS, normalize, possible, read, write, type State } from './urlState.ts'
 
 const GX = 64
 const GY = 56
@@ -26,7 +26,9 @@ const formatCount = (v: number, lang: Lang) => {
   return `≈ ${mant} × 10^${Number(exp)}`
 }
 
-function useUrlState(): [State, (s: State) => void] {
+// Only possible states are saved: an update whose routes no layout agrees with is refused
+// (returns false) and the board and URL stay as they were.
+function useUrlState(): [State, (s: State) => boolean] {
   const [state, setState] = useState(() => read(window.location.search))
   useEffect(() => {
     const onPop = () => setState(read(window.location.search))
@@ -35,8 +37,10 @@ function useUrlState(): [State, (s: State) => void] {
   }, [])
   const update = (s: State) => {
     const next = normalize(s)
+    if (!possible(next)) return false
     window.history.replaceState(null, '', write(next))
     setState(next)
+    return true
   }
   return [state, update]
 }
@@ -48,7 +52,7 @@ function NumberField(props: {
   min: number
   max: number
   value: number
-  onCommit: (v: number) => void
+  onCommit: (v: number) => boolean
 }) {
   const { label, min, max, value, onCommit } = props
   const [draft, setDraft] = useState(String(value))
@@ -59,8 +63,7 @@ function NumberField(props: {
     const v = parseInt(draft, 10)
     if (!Number.isFinite(v)) return setDraft(String(value))
     const clamped = Math.min(max, Math.max(min, v))
-    setDraft(String(clamped))
-    onCommit(clamped)
+    setDraft(String(onCommit(clamped) ? clamped : value))
   }
   return (
     <label>
@@ -83,16 +86,22 @@ const LEVELS = [1, 2, 3, 4, 5]
 const levelLines = (l: number) => l + 4
 
 export default function App() {
-  const [state, setState] = useUrlState()
+  const [state, saveState] = useUrlState()
+  // Set when the last edit was refused as impossible; cleared by the next accepted one.
+  const [refused, setRefused] = useState(false)
+  const setState = (s: State) => {
+    const ok = saveState(s)
+    setRefused(!ok)
+    return ok
+  }
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
   const x = Math.min(state.x, maxLines(n, m))
   const lines = useMemo(() => new Set(state.lines), [state.lines])
-  const empty = useMemo(() => new Set(state.empty), [state.empty])
   const board = useMemo(() => ({ n, m, x }), [n, m, x])
 
   const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [board, lines, played])
-  const blocked = useMemo(() => new Set([...empty, ...traces.flatMap((t) => t.straight)]), [empty, traces])
+  const blocked = useMemo(() => new Set(traces.flatMap((t) => t.straight)), [traces])
   const result = useMemo(() => analyze(board, lines, blocked), [board, lines, blocked])
 
   const math = strategy === 'mathematician'
@@ -152,7 +161,7 @@ export default function App() {
     setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => {
     setClick(null)
-    setState({ ...state, lines: [], empty: [], played: [] })
+    setState({ ...state, lines: [], played: [] })
   }
 
   // Dragging from a start draws a route, committed only if released on the destination row;
@@ -252,6 +261,7 @@ export default function App() {
               {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
+            {refused && <p className="error">{t.impossible}</p>}
             <div className="presets">
               <div className="buttons" role="group" aria-label={t.presets}>
                 {LEVELS.map((l) => (
@@ -262,7 +272,7 @@ export default function App() {
                     title={t.level(l, levelLines(l))}
                     onClick={() => {
                       setClick(null)
-                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })
+                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], played: [] })
                     }}
                   >
                     {l}
