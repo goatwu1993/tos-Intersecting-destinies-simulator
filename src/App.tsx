@@ -142,10 +142,19 @@ export default function App() {
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
   const toggleLine = (r: number, c: number) => {
+    if (click) {
+      const last = click[click.length - 1][1]
+      return extendClick([r, last <= c ? c + 1 : c])
+    }
     const k = key(r, c)
     if (lines.has(k)) return setState({ ...state, lines: state.lines.filter((l) => l !== k) })
     if (lineConflict(r, c)) return
     setState({ ...state, lines: [...state.lines, k] })
+  }
+  // r is the row of the segment's upper node (-1 = below the start post)
+  const clickSegment = (r: number, c: number) => {
+    if (click || r < 0 || !empty.has(key(r, c))) return extendClick([r + 1, c])
+    toggleEmpty(r, c)
   }
   const toggleEmpty = (r: number, c: number) => {
     const k = key(r, c)
@@ -172,11 +181,34 @@ export default function App() {
     const r = Math.min(m, Math.max(-1, Math.round((pt.y - PAD_TOP) / GY) - 1))
     return [r, c]
   }
+  // Clicking steps builds a route without dragging: a vertical step starts one from its
+  // column's start, and further vertical steps / gaps extend it. Reaching the destination
+  // commits it; Commit keeps a partial route, Escape or Cancel drops it.
+  const [click, setClick] = useState<Node[] | null>(null)
+  const extendClick = (target: Node) => {
+    const next = extend(click ?? [[-1, target[1]]], target, m)
+    if (next[next.length - 1][0] === m) {
+      setState(commit(state, next))
+      setClick(null)
+    } else setClick(next)
+  }
+  const commitClick = () => {
+    if (click && click.length > 1) setState(commit(state, click))
+    setClick(null)
+  }
+  useEffect(() => {
+    if (!click) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [click])
+
   const onStartDown = (e: React.PointerEvent, s: number) => {
     // primary button / first finger only, one drag at a time
     if (!e.isPrimary || e.button !== 0 || pointer.current) return
     svgRef.current!.setPointerCapture(e.pointerId)
     pointer.current = { id: e.pointerId, moved: false }
+    setClick(null)
     setDrag([[-1, s]])
   }
   const onMove = (e: React.PointerEvent) => {
@@ -235,6 +267,12 @@ export default function App() {
         <div className="main">
           <div className="board-wrap">
             <div className="board-bar">
+              {click && (
+                <>
+                  <button onClick={commitClick}>{t.commitRoute}</button>
+                  <button onClick={() => setClick(null)}>{t.cancelRoute}</button>
+                </>
+              )}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
             <div className="counter">
@@ -268,10 +306,10 @@ export default function App() {
               ))}
 
               {/* route being drawn */}
-              {drag && (
+              {(drag ?? click) && (
                 <polyline
                   className="path draft"
-                  points={toPoints(drag)}
+                  points={toPoints((drag ?? click)!)}
                 />
               )}
 
@@ -284,24 +322,24 @@ export default function App() {
                 }),
               )}
 
-              {/* clickable vertical segments: mark a dot as having no line */}
-              {Array.from({ length: m }, (_, r) =>
+              {/* clickable vertical segments between nodes: build a route, or unmark a no-line dot */}
+              {Array.from({ length: m + 1 }, (_, i) =>
                 Array.from({ length: n }, (_, c) => {
+                  const r = i - 1
                   const k = key(r, c)
-                  const on = empty.has(k)
-                  const conflict = !on && lineEnds.has(k)
+                  const on = r >= 0 && empty.has(k)
                   return (
                     <rect
                       key={k}
-                      className={`hit vhit ${on ? 'on' : ''} ${conflict ? 'conflict' : ''}`}
+                      className={`hit vhit ${on ? 'on' : ''}`}
                       x={cx(c) - 10}
-                      y={cy(r) - GY / 2 + 2}
+                      y={cy(r) + 10}
                       width={20}
-                      height={GY - 4}
+                      height={GY - 20}
                       rx={6}
-                      onClick={() => toggleEmpty(r, c)}
+                      onClick={() => clickSegment(r, c)}
                     >
-                      <title>{on ? t.unmark : conflict ? t.lineEndsHere : t.markEmpty}</title>
+                      <title>{on && !click ? t.unmark : t.markEmpty}</title>
                     </rect>
                   )
                 }),

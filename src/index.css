@@ -362,6 +362,7 @@ button:hover {
   align-self: stretch;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
