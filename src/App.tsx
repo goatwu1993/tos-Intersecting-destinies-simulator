@@ -50,12 +50,14 @@ function NumberField(props: {
   const { label, min, max, value, onCommit } = props
   const [draft, setDraft] = useState(String(value))
   useEffect(() => setDraft(String(value)), [value])
-  const commit = () => {
+  // Always report the entered value: `value` may be a capped view of a larger stored
+  // value (total lines), so entering the shown number must still save it.
+  const apply = () => {
     const v = parseInt(draft, 10)
     if (!Number.isFinite(v)) return setDraft(String(value))
     const clamped = Math.min(max, Math.max(min, v))
     setDraft(String(clamped))
-    if (clamped !== value) onCommit(clamped)
+    onCommit(clamped)
   }
   return (
     <label>
@@ -66,8 +68,8 @@ function NumberField(props: {
         max={max}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        onBlur={apply}
+        onKeyDown={(e) => e.key === 'Enter' && apply()}
       />
     </label>
   )
@@ -101,6 +103,7 @@ export default function App() {
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
+  const toPoints = (nodes: [number, number][]) => nodes.map(([r, c]) => `${cx(c)},${cy(r)}`).join(' ')
   const width = PAD_X * 2 + (n - 1) * GX
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
@@ -123,9 +126,11 @@ export default function App() {
     setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
   const resetBoard = () => setState({ ...state, lines: [], empty: [], played: [] })
 
-  // Dragging from a start draws a route; releasing without moving toggles the trace.
+  // Dragging from a start draws a route; releasing without ever leaving the start toggles
+  // the trace. Dragging away and back onto the start cancels instead.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
+  const pointer = useRef<{ id: number; moved: boolean } | null>(null)
   const nodeAt = (e: React.PointerEvent): Node => {
     const svg = svgRef.current!
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM()!.inverse())
@@ -134,19 +139,27 @@ export default function App() {
     return [r, c]
   }
   const onStartDown = (e: React.PointerEvent, s: number) => {
+    // primary button / first finger only, one drag at a time
+    if (!e.isPrimary || e.button !== 0 || pointer.current) return
     svgRef.current!.setPointerCapture(e.pointerId)
+    pointer.current = { id: e.pointerId, moved: false }
     setDrag([[-1, s]])
   }
   const onMove = (e: React.PointerEvent) => {
-    if (!drag) return
+    if (!drag || e.pointerId !== pointer.current?.id) return
     const next = extend(drag, nodeAt(e), m)
+    if (next.length > 1) pointer.current.moved = true
     if (next.length !== drag.length || next.some((p, i) => p !== drag[i])) setDrag(next)
   }
-  const onUp = () => {
-    if (!drag) return
-    if (drag.length === 1) togglePlayed(drag[0][1])
-    else setState(commit(state, drag))
+  const endDrag = () => {
+    pointer.current = null
     setDrag(null)
+  }
+  const onUp = (e: React.PointerEvent) => {
+    if (!drag || e.pointerId !== pointer.current?.id) return
+    if (drag.length > 1) setState(commit(state, drag))
+    else if (!pointer.current.moved) togglePlayed(drag[0][1])
+    endDrag()
   }
 
   const probs = result.ok ? result.prob.map((row) => row[dest]) : []
@@ -178,7 +191,7 @@ export default function App() {
             className={`board ${drag ? 'dragging' : ''}`}
             onPointerMove={onMove}
             onPointerUp={onUp}
-            onPointerCancel={() => setDrag(null)}
+            onPointerCancel={(e) => e.pointerId === pointer.current?.id && endDrag()}
             viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
             {/* column tracks */}
             {Array.from({ length: n }, (_, c) => (
@@ -196,7 +209,7 @@ export default function App() {
               <polyline
                 key={played[i]}
                 className="path"
-                points={t.points.map(([r, c]) => `${cx(c)},${cy(r)}`).join(' ')}
+                points={toPoints(t.points)}
               />
             ))}
 
@@ -204,7 +217,7 @@ export default function App() {
             {drag && (
               <polyline
                 className="path draft"
-                points={drag.map(([r, c]) => `${cx(c)},${cy(r)}`).join(' ')}
+                points={toPoints(drag)}
               />
             )}
 
