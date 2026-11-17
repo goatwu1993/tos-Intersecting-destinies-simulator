@@ -281,7 +281,7 @@ export default function App() {
             <div className="counter">
               <button
                 aria-label={t.fewerLines}
-                disabled={x <= 0}
+                disabled={x <= LIMITS.x[0]}
                 onClick={() => setState({ ...state, x: x - 1 })}
               >
                 −
@@ -289,7 +289,7 @@ export default function App() {
               {t.linesRevealed(lines.size, x)}
               <button
                 aria-label={t.moreLines}
-                disabled={x >= maxLines(n, m)}
+                disabled={x >= LIMITS.x[1]}
                 onClick={() => setState({ ...state, x: x + 1 })}
               >
                 +
@@ -500,8 +500,8 @@ export default function App() {
             />
             <NumberField
               label={t.totalLines}
-              min={0}
-              max={maxLines(n, m)}
+              min={LIMITS.x[0]}
+              max={LIMITS.x[1]}
               value={x}
               onCommit={(v) => setState({ ...state, x: v })}
             />
