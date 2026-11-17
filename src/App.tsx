@@ -32,15 +32,17 @@ type Notice = 'impossible' | 'contradicts' | 'adjusted'
 type Saved = { state: State; known: Known; notice: Notice | null }
 
 const load = (): Saved => {
-  const { state, known, adjusted } = read(window.location.search)
-  // rewrite a cleaned-up link so reloading or copying it doesn't pass the bad state on
-  if (adjusted) window.history.replaceState(null, '', write(state))
-  return { state, known, notice: adjusted ? 'adjusted' : null }
+  const { state, known, dropped } = read(window.location.search)
+  // rewrite the link in its saved form, so reloading or copying it doesn't pass on
+  // anything that was dropped or clamped
+  const url = write(state)
+  if (url !== window.location.search) window.history.replaceState(null, '', url)
+  return { state, known, notice: dropped ? 'adjusted' : null }
 }
 
 // Only possible states are saved: an update whose routes no layout agrees with is refused
-// (returns false), the board and URL stay as they were, and the notice says why. Any
-// accepted update clears the notice.
+// (returns false), the board and URL stay as they were, and the notice says why. The
+// notice stays until the next accepted update.
 function useUrlState() {
   const [saved, setSaved] = useState(load)
   useEffect(() => {
@@ -135,7 +137,8 @@ export default function App() {
     }
     worker.postMessage(input)
     return () => worker.terminate()
-  }, [math, board, lines, blocked, played, dest, result])
+    // known only changes with the board or routes, so other edits (language…) don't restart it
+  }, [math, known, dest])
 
   const lineEnds = useMemo(() => {
     const s = new Set<string>()
@@ -161,18 +164,26 @@ export default function App() {
   }
   // r is the row of the segment's upper node (-1 = below the start post)
   const clickSegment = (r: number, c: number) => extendClick([r + 1, c])
-  // Clicking an untraced start fast-forwards it to a destination along the revealed lines;
-  // draw a route from it afterwards to correct it. Clicking a traced start removes its
+  // Routes are only drawn (dragged or clicked) in full; clicking a traced start removes its
   // route and what it revealed.
-  const togglePlayed = (s: number) =>
-    setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
+  const untrace = (s: number) => played.includes(s) && setState(removeRoute(state, s))
+  // There can't be fewer lines in total than are already revealed.
+  const minX = Math.max(LIMITS.x[0], lines.size)
+  // Routes seen on one board shape don't carry over to another, so a new shape starts
+  // empty, as a level preset does.
+  const resize = (size: { n: number } | { m: number }) => {
+    const next = { ...state, ...size }
+    if (next.n === n && next.m === m) return true
+    setClick(null)
+    return setState({ ...next, lines: [], played: [] })
+  }
   const resetBoard = () => {
-    cancelClick()
+    setClick(null)
     setState({ ...state, lines: [], played: [] })
   }
 
   // Dragging from a start draws a route, committed only if released on the destination row;
-  // releasing without ever leaving the start toggles the trace. Anything else cancels.
+  // releasing without ever leaving the start untraces it. Anything else cancels.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
   const pointer = useRef<{ id: number; moved: boolean } | null>(null)
@@ -185,27 +196,23 @@ export default function App() {
   }
   // Clicking steps builds a route without dragging: a vertical step starts one from its
   // column's start, and further vertical steps / gaps extend it. Reaching the destination
-  // commits it; Escape or Cancel drops it. A refused route stays as the draft, so it can
-  // be stepped back and fixed instead of redrawn.
+  // commits it; Escape or Cancel drops it. A route that is impossible or contradicts a
+  // traced one is dropped too, with a notice.
   const [click, setClick] = useState<Node[] | null>(null)
   const saveRoute = (path: Node[]) => {
     const next = commit(state, path)
-    if (next) return setState(next)
-    setNotice('contradicts')
-    return false
+    if (next) setState(next)
+    else setNotice('contradicts')
   }
   const extendClick = (target: Node) => {
     const next = extend(click ?? [[-1, target[1]]], target, m)
-    setClick(next[next.length - 1][0] === m && saveRoute(next) ? null : next)
-  }
-  // dropping the draft also drops the notice about why it wasn't saved
-  const cancelClick = () => {
+    if (next[next.length - 1][0] !== m) return setClick(next)
+    saveRoute(next)
     setClick(null)
-    setNotice(null)
   }
   useEffect(() => {
     if (!click) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && cancelClick()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [click])
@@ -215,7 +222,7 @@ export default function App() {
     if (!e.isPrimary || e.button !== 0 || pointer.current) return
     svgRef.current!.setPointerCapture(e.pointerId)
     pointer.current = { id: e.pointerId, moved: false }
-    cancelClick()
+    setClick(null)
     setDrag([[-1, s]])
   }
   const onMove = (e: React.PointerEvent) => {
@@ -230,10 +237,8 @@ export default function App() {
   }
   const onUp = (e: React.PointerEvent) => {
     if (!drag || e.pointerId !== pointer.current?.id) return
-    // a refused drag becomes a click draft rather than being lost
-    if (drag[drag.length - 1][0] === m) {
-      if (!saveRoute(drag)) setClick(drag)
-    } else if (!pointer.current.moved) togglePlayed(drag[0][1])
+    if (drag[drag.length - 1][0] === m) saveRoute(drag)
+    else if (!pointer.current.moved) untrace(drag[0][1])
     endDrag()
   }
 
@@ -276,7 +281,7 @@ export default function App() {
         <div className="main">
           <div className="board-wrap">
             <div className="board-bar">
-              {click && <button onClick={cancelClick}>{t.cancelRoute}</button>}
+              {click && <button onClick={() => setClick(null)}>{t.cancelRoute}</button>}
               <button onClick={resetBoard}>{t.reset}</button>
             </div>
             {notice && <p className="error">{t[notice]}</p>}
@@ -289,7 +294,7 @@ export default function App() {
                     aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
                     title={t.level(l, levelLines(l))}
                     onClick={() => {
-                      cancelClick()
+                      setClick(null)
                       setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], played: [] })
                     }}
                   >
@@ -301,7 +306,7 @@ export default function App() {
             <div className="counter">
               <button
                 aria-label={t.fewerLines}
-                disabled={x <= LIMITS.x[0]}
+                disabled={x <= minX}
                 onClick={() => setState({ ...state, x: x - 1 })}
               >
                 −
@@ -486,25 +491,25 @@ export default function App() {
               min={LIMITS.n[0]}
               max={LIMITS.n[1]}
               value={n}
-              onCommit={(v) => setState({ ...state, n: v })}
+              onCommit={(v) => resize({ n: v })}
             />
             <NumberField
               label={t.dotRows}
               min={LIMITS.m[0]}
               max={LIMITS.m[1]}
               value={m}
-              onCommit={(v) => setState({ ...state, m: v })}
+              onCommit={(v) => resize({ m: v })}
             />
             <NumberField
               label={t.totalLines}
-              min={LIMITS.x[0]}
+              min={minX}
               max={LIMITS.x[1]}
               value={x}
               onCommit={(v) => setState({ ...state, x: v })}
             />
             <div className="buttons">
               <button onClick={() => {
-                cancelClick()
+                setClick(null)
                 setState({ ...DEFAULT, lang })
               }}>{t.resetAll}</button>
               <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>{t.copyLink}</button>

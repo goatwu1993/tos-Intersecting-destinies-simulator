@@ -43,6 +43,12 @@ export function normalize(s: State): State {
     ends.add(a).add(b)
     lines.push(a)
   }
+  // a fixed order, so the same lines always save (and compare) the same
+  lines.sort((a, b) => {
+    const [ra, ca] = parseKey(a)
+    const [rb, cb] = parseKey(b)
+    return ra - rb || ca - cb
+  })
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
   // Lines are only known from traced routes, so keep just the ones some route crosses. A line
   // no route crosses never touches a route's dots, so dropping it leaves every route as is.
@@ -87,10 +93,10 @@ export const sameBoard = (a: State, b: State) =>
   a.lines.join() === b.lines.join() &&
   a.played.join() === b.played.join()
 
-// `adjusted` is set when the link held something that isn't kept: lines no route crosses,
+// `dropped` is set when the link held something that isn't kept: lines no route crosses,
 // the retired `e` (no-line dots) param, out-of-range starts, or routes that are impossible
 // (which load as an empty board).
-export type Loaded = { state: State; known: Known; adjusted: boolean }
+export type Loaded = { state: State; known: Known; dropped: boolean }
 
 export function read(search: string): Loaded {
   const q = new URLSearchParams(search)
@@ -110,11 +116,12 @@ export function read(search: string): Loaded {
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
   const known = derive(s)
-  const dropped = q.has('e') || s.lines.length < lines.length || s.played.length < played.length
-  if (known) return { state: s, known, adjusted: dropped }
+  const dropped =
+    list('e').length > 0 || s.lines.length < new Set(lines).size || s.played.length < new Set(played).size
+  if (known) return { state: s, known, dropped }
   // a link whose routes can't happen keeps its settings but loads an empty board
   const empty = { ...s, lines: [], played: [] }
-  return { state: empty, known: derive(empty)!, adjusted: true }
+  return { state: empty, known: derive(empty)!, dropped: true }
 }
 
 export function write(s: State): string {

@@ -14,8 +14,8 @@ const en = {
   rules: [
     'Drag from a start down to the destination row to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
     'Or click vertical segments to build a route step by step; once building, click between two dots to take a line. It is saved when it reaches the destination row.',
-    'Click a start to fast-forward it to a destination along the revealed lines; draw a route from it to correct it.',
-    'Click a start that already has a route to remove that route (and the lines and no-line dots only it revealed).',
+    'Draw a route again from a traced start to correct it. A route that contradicts another traced route, or that no layout of the lines allows, is not saved.',
+    'Click a start that already has a route to remove that route (and the lines only it revealed).',
     'Click a destination to target it.',
     'Click Reset to clear all revealed lines, no-line dots and routes.',
   ],
@@ -70,8 +70,8 @@ const zh: Messages = {
   rules: [
     '從起點往下拖曳到終點列，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
     '或點擊直線段逐步建立路線；建立中可點擊兩點之間走橫線。抵達終點列時即儲存。',
-    '點擊起點讓它沿著已揭示的橫線直達終點；之後可從該起點重畫路線來修正。',
-    '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線與無橫線點）。',
+    '從已追蹤的起點重畫路線即可修正。與其他已追蹤路線矛盾、或沒有任何橫線排列允許的路線不會被儲存。',
+    '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線）。',
     '點擊終點可將它設為目標。',
     '點擊「重置」可清除所有已揭示的橫線、無橫線點與路線。',
   ],
