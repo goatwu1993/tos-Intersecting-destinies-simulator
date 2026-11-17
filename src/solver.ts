@@ -15,6 +15,11 @@ export type Board = { n: number; m: number; x: number }
 // Dots and lines share the "row.col" key; a line's key is its left dot.
 export const key = (r: number, c: number) => `${r}.${c}`
 export const parseKey = (k: string) => k.split('.').map(Number) as [number, number]
+// The two dots a line joins.
+export const lineDots = (line: string) => {
+  const [r, c] = parseKey(line)
+  return [key(r, c), key(r, c + 1)]
+}
 
 // Lines can't share a dot, so each row fits at most floor(n / 2).
 export const maxLines = (n: number, m: number) => m * Math.floor(n / 2)

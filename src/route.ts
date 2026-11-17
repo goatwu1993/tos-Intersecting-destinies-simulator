@@ -1,4 +1,4 @@
-import { key, parseKey, trace } from './solver.ts'
+import { key, lineDots, trace } from './solver.ts'
 import type { State } from './urlState.ts'
 
 // A drawn route is a list of grid nodes [row, col]; row -1 is the start post, row m the destination post.
@@ -28,10 +28,7 @@ export function extend(path: Node[], target: Node, m: number): Node[] {
   return out
 }
 
-const touches = (line: string, dot: string) => {
-  const [r, c] = parseKey(line)
-  return key(r, c) === dot || key(r, c + 1) === dot
-}
+const touches = (line: string, dot: string) => lineDots(line).includes(dot)
 
 // Apply a route drawn down to the destination row: sideways steps become revealed lines,
 // and the route replaces what was known along it, including an earlier route from the same

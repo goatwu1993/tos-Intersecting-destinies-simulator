@@ -4,7 +4,7 @@
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
-import { analyze, key, maxLines, parseKey, trace, type Analysis, type Board, type Trace } from './solver.ts'
+import { analyze, key, lineDots, maxLines, parseKey, trace, type Analysis, type Board, type Trace } from './solver.ts'
 
 export type Strategy = 'gambler' | 'mathematician'
 
@@ -37,11 +37,11 @@ export function normalize(s: State): State {
   for (const k of s.lines) {
     const [r, c] = parseKey(k)
     if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n - 1)) continue
-    const a = key(r, c)
-    const b = key(r, c + 1)
-    if (ends.has(a) || ends.has(b)) continue // shares an endpoint: invalid
-    ends.add(a).add(b)
-    lines.push(a)
+    const k2 = key(r, c)
+    const dots = lineDots(k2)
+    if (dots.some((d) => ends.has(d))) continue // shares an endpoint: invalid
+    dots.forEach((d) => ends.add(d))
+    lines.push(k2)
   }
   // a fixed order, so the same lines always save (and compare) the same
   lines.sort((a, b) => {
@@ -50,15 +50,11 @@ export function normalize(s: State): State {
     return ra - rb || ca - cb
   })
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  // Lines are only known from traced routes, so keep just the ones some route crosses. A line
-  // no route crosses never touches a route's dots, so dropping it leaves every route as is.
-  const all = new Set(lines)
-  const used = new Set(played.flatMap((p) => trace(s, all, p).lines))
   return {
     n,
     m,
     x,
-    lines: lines.filter((l) => used.has(l)),
+    lines,
     played,
     dest: Math.min(s.dest, n - 1),
     lang: s.lang,
@@ -71,18 +67,28 @@ export type Known = {
   board: Board // x capped to what the board can hold
   lines: Set<string>
   traces: Trace[]
+  ends: Set<string> // dots a line joins
   blocked: Set<string> // dots a route passes straight through, so they have no line
+  played: number[] // the state's traced starts (same array while the board is unchanged)
   result: Extract<Analysis, { ok: true }>
 }
 
 // null when the routes are impossible: no layout of the x lines agrees with them.
-export function derive(s: State): Known | null {
+// Lines are only known from traced routes, so the returned state keeps just the lines some
+// route crosses. A line no route crosses never touches a route's dots, so dropping it leaves
+// every route as is, and the traces made with it still hold.
+export function derive(s: State): { state: State; known: Known } | null {
   const board = { n: s.n, m: s.m, x: Math.min(s.x, maxLines(s.n, s.m)) }
-  const lines = new Set(s.lines)
-  const traces = s.played.map((p) => trace(board, lines, p))
+  const all = new Set(s.lines)
+  const traces = s.played.map((p) => trace(board, all, p))
+  const used = new Set(traces.flatMap((t) => t.lines))
+  const state = used.size === s.lines.length ? s : { ...s, lines: s.lines.filter((l) => used.has(l)) }
+  const lines = new Set(state.lines)
+  const ends = new Set(state.lines.flatMap(lineDots))
   const blocked = new Set(traces.flatMap((t) => t.straight))
   const result = analyze(board, lines, blocked)
-  return result.ok ? { board, lines, traces, blocked, result } : null
+  if (!result.ok) return null
+  return { state, known: { board, lines, traces, ends, blocked, played: state.played, result } }
 }
 
 // Whether two states have the same board and routes, so the same Known.
@@ -93,9 +99,9 @@ export const sameBoard = (a: State, b: State) =>
   a.lines.join() === b.lines.join() &&
   a.played.join() === b.played.join()
 
-// `dropped` is set when the link held something that isn't kept: lines no route crosses,
-// the retired `e` (no-line dots) param, out-of-range starts, or routes that are impossible
-// (which load as an empty board).
+// `dropped` is set when the link held something that isn't kept as given: lines no route
+// crosses or that overlap, the retired `e` (no-line dots) param, out-of-range values, or
+// routes that are impossible (which load as an empty board).
 export type Loaded = { state: State; known: Known; dropped: boolean }
 
 export function read(search: string): Loaded {
@@ -115,13 +121,24 @@ export function read(search: string): Loaded {
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
-  const known = derive(s)
+  const d = derive(s)
+  if (!d) {
+    // a link whose routes can't happen keeps its settings but loads an empty board
+    const empty = derive({ ...s, lines: [], played: [] })!
+    return { ...empty, dropped: true }
+  }
+  const { state } = d
+  // a number param that was out of range (or not a number) and so was clamped
+  const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)
   const dropped =
-    list('e').length > 0 || s.lines.length < new Set(lines).size || s.played.length < new Set(played).size
-  if (known) return { state: s, known, dropped }
-  // a link whose routes can't happen keeps its settings but loads an empty board
-  const empty = { ...s, lines: [], played: [] }
-  return { state: empty, known: derive(empty)!, dropped: true }
+    list('e').length > 0 ||
+    state.lines.length < new Set(lines).size ||
+    state.played.length < new Set(played).size ||
+    clamped('n', state.n) ||
+    clamped('m', state.m) ||
+    clamped('x', state.x) ||
+    clamped('d', state.dest)
+  return { ...d, dropped }
 }
 
 export function write(s: State): string {

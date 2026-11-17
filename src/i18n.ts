@@ -13,7 +13,7 @@ const en = {
   title: 'Intersecting Destinies Simulator',
   rules: [
     'Drag from a start down to the destination row to draw a route you saw (sideways steps become lines, straight steps mark dots as having no line).',
-    'Or click vertical segments to build a route step by step; once building, click between two dots to take a line. It is saved when it reaches the destination row.',
+    'Or click vertical segments to build a route step by step; once building, click between two dots to take a line, or click a line it takes to undo back to it. It is saved when it reaches the destination row.',
     'Draw a route again from a traced start to correct it. A route that contradicts another traced route, or that no layout of the lines allows, is not saved.',
     'Click a start that already has a route to remove that route (and the lines only it revealed).',
     'Click a destination to target it.',
@@ -29,7 +29,8 @@ const en = {
   stepAcross: 'Route: take this line',
   impossible: 'Not saved: no layout of the lines agrees with that.',
   contradicts: 'Not saved: this route contradicts a route already traced.',
-  adjusted: 'This link had lines no traced route crosses, no-line dots, or impossible routes; they were removed.',
+  adjusted:
+    'This link had parts that couldn’t be kept (lines no traced route crosses or that overlap, no-line dots, out-of-range values, or impossible routes); they were removed or corrected.',
   board: 'Board',
   presets: 'Presets',
   level: (l: number, x: number) => `Level ${l} · ${x} lines`,
@@ -69,7 +70,7 @@ const zh: Messages = {
   title: '路徑模擬器',
   rules: [
     '從起點往下拖曳到終點列，畫出你看到的路線（橫向移動會成為橫線，直行經過的點會標記為沒有橫線）。',
-    '或點擊直線段逐步建立路線；建立中可點擊兩點之間走橫線。抵達終點列時即儲存。',
+    '或點擊直線段逐步建立路線；建立中可點擊兩點之間走橫線，點擊路線已走的橫線可退回到該處。抵達終點列時即儲存。',
     '從已追蹤的起點重畫路線即可修正。與其他已追蹤路線矛盾、或沒有任何橫線排列允許的路線不會被儲存。',
     '點擊已畫出路線的起點可移除其路線（以及只有該路線揭示的橫線）。',
     '點擊終點可將它設為目標。',
@@ -85,7 +86,7 @@ const zh: Messages = {
   stepAcross: '路線：走這條橫線',
   impossible: '未儲存：沒有任何橫線排列符合此狀態。',
   contradicts: '未儲存：此路線與已追蹤的路線矛盾。',
-  adjusted: '此連結含有沒有路線經過的橫線、無橫線點或不可能的路線，已將其移除。',
+  adjusted: '此連結含有無法保留的內容（沒有路線經過或彼此重疊的橫線、無橫線點、超出範圍的數值或不可能的路線），已移除或修正。',
   board: '盤面',
   presets: '預設關卡',
   level: (l, x) => `關卡 ${l} · ${x} 條橫線`,

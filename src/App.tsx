@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LANGS, messages, type Lang } from './i18n.ts'
 import { commit, extend, removeRoute, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
-import { key, parseKey } from './solver.ts'
+import { key, maxLines, parseKey } from './solver.ts'
 import { DEFAULT, LIMITS, derive, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
@@ -33,20 +33,28 @@ type Saved = { state: State; known: Known; notice: Notice | null }
 
 const load = (): Saved => {
   const { state, known, dropped } = read(window.location.search)
-  // rewrite the link in its saved form, so reloading or copying it doesn't pass on
-  // anything that was dropped or clamped
-  const url = write(state)
-  if (url !== window.location.search) window.history.replaceState(null, '', url)
   return { state, known, notice: dropped ? 'adjusted' : null }
 }
 
+// Put the state's saved form in the URL. On load this also rewrites a link that had
+// something dropped or clamped, so reloading or copying it doesn't pass that on.
+const rewrite = (s: State) => {
+  const url = write(s)
+  if (url !== window.location.search) window.history.replaceState(null, '', url)
+}
+
 // Only possible states are saved: an update whose routes no layout agrees with is refused
-// (returns false), the board and URL stay as they were, and the notice says why. The
-// notice stays until the next accepted update.
+// (returns false), the board and URL stay as they were, and the notice says why. A notice
+// is about the board, so it stays until the board or routes change.
 function useUrlState() {
   const [saved, setSaved] = useState(load)
   useEffect(() => {
-    const onPop = () => setSaved(load())
+    rewrite(saved.state)
+    const onPop = () => {
+      const next = load()
+      rewrite(next.state)
+      setSaved(next)
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -54,13 +62,14 @@ function useUrlState() {
   const update = (s: State) => {
     const next = normalize(s)
     // edits that leave the board and routes alone (language, destination…) reuse the odds
-    const known = sameBoard(next, saved.state) ? saved.known : derive(next)
-    if (!known) {
+    const same = sameBoard(next, saved.state)
+    const d = same ? { state: next, known: saved.known } : derive(next)
+    if (!d) {
       setNotice('impossible')
       return false
     }
-    window.history.replaceState(null, '', write(next))
-    setSaved({ state: next, known, notice: null })
+    rewrite(d.state)
+    setSaved({ ...d, notice: same ? saved.notice : null })
     return true
   }
   return { ...saved, update, setNotice }
@@ -73,9 +82,10 @@ function NumberField(props: {
   min: number
   max: number
   value: number
+  disabled?: boolean
   onCommit: (v: number) => boolean
 }) {
-  const { label, min, max, value, onCommit } = props
+  const { label, min, max, value, disabled, onCommit } = props
   const [draft, setDraft] = useState(String(value))
   useEffect(() => setDraft(String(value)), [value])
   // Always report the entered value: `value` may be a capped view of a larger stored
@@ -94,6 +104,7 @@ function NumberField(props: {
         min={min}
         max={max}
         value={draft}
+        disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={apply}
         onKeyDown={(e) => e.key === 'Enter' && apply()}
@@ -110,7 +121,7 @@ export default function App() {
   const { state, known, notice, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
   const t = messages[lang]
-  const { board, lines, traces, blocked, result } = known
+  const { board, lines, ends: lineEnds, traces, blocked, result } = known
   const { x } = board
 
   const math = strategy === 'mathematician'
@@ -131,23 +142,15 @@ export default function App() {
       board,
       lines: [...lines],
       blocked: [...blocked],
-      played,
+      played: known.played,
       dest,
       layoutCount: result.layouts,
     }
     worker.postMessage(input)
     return () => worker.terminate()
-    // known only changes with the board or routes, so other edits (language…) don't restart it
-  }, [math, known, dest])
-
-  const lineEnds = useMemo(() => {
-    const s = new Set<string>()
-    for (const k of lines) {
-      const [r, c] = parseKey(k)
-      s.add(key(r, c)).add(key(r, c + 1))
-    }
-    return s
-  }, [lines])
+    // known (and so known.played) only changes with the board or routes, so other edits
+    // (language…) don't restart the search
+  }, [math, board, lines, blocked, known.played, dest, result])
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
@@ -156,9 +159,15 @@ export default function App() {
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
   // Lines and no-line dots only come from whole routes, as in the game, so gaps are only
-  // clickable while building a route: they step it sideways.
+  // clickable while building a route: they step it sideways, or, on a line the route
+  // already takes, undo the route back to just before that line.
   const clickGap = (r: number, c: number) => {
     if (!click) return
+    const i = click.findIndex(([r1, c1], j) => {
+      const next = click[j + 1]
+      return r1 === r && next?.[0] === r && Math.min(c1, next[1]) === c
+    })
+    if (i >= 0) return setClick(click.slice(0, i + 1))
     const last = click[click.length - 1][1]
     extendClick([r, last <= c ? c + 1 : c])
   }
@@ -167,14 +176,15 @@ export default function App() {
   // Routes are only drawn (dragged or clicked) in full; clicking a traced start removes its
   // route and what it revealed.
   const untrace = (s: number) => played.includes(s) && setState(removeRoute(state, s))
-  // There can't be fewer lines in total than are already revealed.
+  // There can't be fewer lines in total than are already revealed, or more than the board
+  // holds. A board too small for the minimum shows its capacity, which can't be changed.
   const minX = Math.max(LIMITS.x[0], lines.size)
+  const maxX = Math.min(LIMITS.x[1], maxLines(n, m))
   // Routes seen on one board shape don't carry over to another, so a new shape starts
   // empty, as a level preset does.
   const resize = (size: { n: number } | { m: number }) => {
     const next = { ...state, ...size }
     if (next.n === n && next.m === m) return true
-    setClick(null)
     return setState({ ...next, lines: [], played: [] })
   }
   const resetBoard = () => {
@@ -216,6 +226,12 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [click])
+  // A draft is drawn on one board shape; a new shape (resize, back/forward) drops it.
+  useEffect(() => {
+    setClick(null)
+    setDrag(null)
+    pointer.current = null
+  }, [n, m])
 
   const onStartDown = (e: React.PointerEvent, s: number) => {
     // primary button / first finger only, one drag at a time
@@ -314,7 +330,7 @@ export default function App() {
               {t.linesRevealed(lines.size, x)}
               <button
                 aria-label={t.moreLines}
-                disabled={x >= LIMITS.x[1]}
+                disabled={x >= maxX}
                 onClick={() => setState({ ...state, x: x + 1 })}
               >
                 +
@@ -503,8 +519,9 @@ export default function App() {
             <NumberField
               label={t.totalLines}
               min={minX}
-              max={LIMITS.x[1]}
+              max={maxX}
               value={x}
+              disabled={maxX <= minX}
               onCommit={(v) => setState({ ...state, x: v })}
             />
             <div className="buttons">
