@@ -41,9 +41,10 @@ export function expectedTokens(
   const end = new Int8Array(layoutCount * n)
   const sig = new Int32Array(layoutCount * n)
   let count = 0
-  const rec = (r: number, used: number, cur: number[], sg: number[]) => {
+  const allCovered = (1 << n) - 1
+  const rec = (r: number, used: number, cover: number, cur: number[], sg: number[]) => {
     if (r === m) {
-      if (used !== remaining) return
+      if (used !== remaining || cover !== allCovered) return
       for (let s = 0; s < n; s++) {
         end[count * n + s] = cur[s]
         sig[count * n + s] = sg[s]
@@ -57,12 +58,13 @@ export function expectedTokens(
       rec(
         r + 1,
         used + o.k,
+        cover | o.cover,
         cur.map((c) => o.map[c]),
         sg.map((v, s) => v * 3 + (o.map[cur[s]] - cur[s] + 1)),
       )
     }
   }
-  rec(0, 0, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
+  rec(0, 0, 0, Array.from({ length: n }, (_, i) => i), new Array(n).fill(0))
 
   // set: layouts still consistent; mask: starts already traced.
   const value = (set: number[], mask: number, s: number, unplayed: number): number => {
