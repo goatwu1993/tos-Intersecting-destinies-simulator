@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LANGS, messages, type Lang } from './i18n.ts'
-import { commit, extend, removeRoute, type Node } from './route.ts'
+import { clickLine, clickSegment, commit, complete, extend, removeRoute, type Draft, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
 import { key, maxLines, parseKey } from './solver.ts'
@@ -158,21 +158,6 @@ export default function App() {
   const width = PAD_X * 2 + (n - 1) * GX
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
-  // Lines and no-line dots only come from whole routes, as in the game, so gaps are only
-  // clickable while building a route: they step it sideways, or, on a line the route
-  // already takes, undo the route back to just before that line.
-  const clickGap = (r: number, c: number) => {
-    if (!click) return
-    const i = click.findIndex(([r1, c1], j) => {
-      const next = click[j + 1]
-      return r1 === r && next?.[0] === r && Math.min(c1, next[1]) === c
-    })
-    if (i >= 0) return setClick(click.slice(0, i + 1))
-    const last = click[click.length - 1][1]
-    extendClick([r, last <= c ? c + 1 : c])
-  }
-  // r is the row of the segment's upper node (-1 = below the start post)
-  const clickSegment = (r: number, c: number) => extendClick([r + 1, c])
   // Routes are only drawn (dragged or clicked) in full; clicking a traced start removes its
   // route and what it revealed.
   const untrace = (s: number) => played.includes(s) && setState(removeRoute(state, s))
@@ -204,22 +189,27 @@ export default function App() {
     const r = Math.min(m, Math.max(-1, Math.round((pt.y - PAD_TOP) / GY) - 1))
     return [r, c]
   }
-  // Clicking steps builds a route without dragging: a vertical step starts one from its
-  // column's start, and further vertical steps / gaps extend it. Reaching the destination
-  // commits it; Escape or Cancel drops it. A route that is impossible or contradicts a
-  // traced one is dropped too, with a notice.
-  const [click, setClick] = useState<Node[] | null>(null)
+  // Clicking pieces builds a route without dragging (see Draft): a vertical segment starts
+  // one, and segments / lines at either end grow it. Once it joins a start to a destination
+  // it is committed; Escape or Cancel drops it. A route that is impossible or contradicts a
+  // traced one is dropped too, with a notice. Lines and no-line dots only come from whole
+  // routes, as in the game, so gaps are only clickable while building a route.
+  const [click, setClick] = useState<Draft | null>(null)
   const saveRoute = (path: Node[]) => {
     const next = commit(state, path)
     if (next) setState(next)
     else setNotice('contradicts')
   }
-  const extendClick = (target: Node) => {
-    const next = extend(click ?? [[-1, target[1]]], target, m)
-    if (next[next.length - 1][0] !== m) return setClick(next)
-    saveRoute(next)
-    setClick(null)
+  const editDraft = (next: Draft | null) => {
+    if (next && complete(next, m)) {
+      saveRoute(next.path)
+      return setClick(null)
+    }
+    setClick(next)
   }
+  // r is the row of the segment's upper node (-1 = below the start post)
+  const onSegment = (r: number, c: number) => editDraft(clickSegment(click, r, c))
+  const onGap = (r: number, c: number) => click && editDraft(clickLine(click, r, c))
   useEffect(() => {
     if (!click) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setClick(null)
@@ -364,10 +354,10 @@ export default function App() {
               ))}
 
               {/* route being drawn */}
-              {(drag ?? click) && (
+              {(drag ?? click?.path) && (
                 <polyline
                   className="path draft"
-                  points={toPoints((drag ?? click)!)}
+                  points={toPoints((drag ?? click?.path)!)}
                 />
               )}
 
@@ -394,7 +384,7 @@ export default function App() {
                       width={20}
                       height={GY - 20}
                       rx={6}
-                      onClick={() => clickSegment(r, c)}
+                      onClick={() => onSegment(r, c)}
                     >
                       <title>{t.stepDown}</title>
                     </rect>
@@ -415,7 +405,7 @@ export default function App() {
                       width={GX - 20}
                       height={36}
                       rx={6}
-                      onClick={() => clickGap(r, c)}
+                      onClick={() => onGap(r, c)}
                     >
                       <title>{t.stepAcross}</title>
                     </rect>

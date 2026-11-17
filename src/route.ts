@@ -28,6 +28,68 @@ export function extend(path: Node[], target: Node, m: number): Node[] {
   return out
 }
 
+// A route built by clicking pieces: a path (top to bottom) grown from the first vertical
+// segment clicked, whose upper node is `origin`. It grows at either end, so it can be drawn
+// top-down or bottom-up, and is complete once it runs from a start (row -1) to a destination
+// (row m). Both ends are always reached by a vertical step, so a line can be taken there.
+export type Draft = { path: Node[]; origin: Node }
+
+const column = (r0: number, r1: number, c: number): Node[] =>
+  Array.from({ length: r1 - r0 + 1 }, (_, i) => [r0 + i, c])
+
+// Index of the piece from path[i] to path[i + 1] matching `is`, or -1.
+const pieceAt = (path: Node[], is: (a: Node, b: Node) => boolean) =>
+  path.findIndex((a, i) => i + 1 < path.length && is(a, path[i + 1]))
+
+// Undo the piece at i and everything added beyond it, away from the first segment; a line
+// that would be left at the new end goes too. Undoing the first segment drops the draft.
+function undo(d: Draft, i: number): Draft | null {
+  const { path } = d
+  const o = pieceAt(path, (a) => same(a, d.origin))
+  if (i === o) return null
+  const sideways = (a: Node, b: Node) => a[0] === b[0]
+  if (i > o) return { ...d, path: path.slice(0, sideways(path[i - 1], path[i]) ? i : i + 1) }
+  return { ...d, path: path.slice(sideways(path[i + 1], path[i + 2]) ? i + 2 : i + 1) }
+}
+
+export const complete = (d: Draft, m: number) => d.path[0][0] === -1 && d.path[d.path.length - 1][0] === m
+
+// Click the vertical segment from (r, c) down to (r + 1, c), r = -1 … m - 1. It undoes a
+// segment in the draft, extends an end straight along its column, or starts a new draft.
+export function clickSegment(d: Draft | null, r: number, c: number): Draft | null {
+  const fresh = { path: [[r, c], [r + 1, c]] as Node[], origin: [r, c] as Node }
+  if (!d) return fresh
+  const { path } = d
+  const i = pieceAt(path, (a, b) => same(a, [r, c]) && same(b, [r + 1, c]))
+  if (i >= 0) return undo(d, i)
+  const [rb, cb] = path[path.length - 1]
+  if (c === cb && r >= rb) return { ...d, path: [...path, ...column(rb + 1, r + 1, c)] }
+  const [rt, ct] = path[0]
+  if (c === ct && r + 1 <= rt) return { ...d, path: [...column(r, rt - 1, c), ...path] }
+  return fresh
+}
+
+// Click the line on dot row r joining columns c and c + 1. It undoes a line in the draft, or
+// takes it from an end in its column (going straight there first if needed). Two lines can't
+// share a dot, so a line taken is always followed by the vertical step past it: down at the
+// bottom end, up at the top. Lines that can't join either end are ignored.
+export function clickLine(d: Draft, r: number, c: number): Draft | null {
+  const { path } = d
+  const i = pieceAt(path, (a, b) => a[0] === r && b[0] === r && Math.min(a[1], b[1]) === c)
+  if (i >= 0) return undo(d, i)
+  const other = (col: number) => (col === c ? c + 1 : c)
+  const touches = (col: number) => col === c || col === c + 1
+  const [rb, cb] = path[path.length - 1]
+  if (touches(cb) && r >= rb) {
+    return { ...d, path: [...path, ...column(rb + 1, r, cb), [r, other(cb)], [r + 1, other(cb)]] }
+  }
+  const [rt, ct] = path[0]
+  if (touches(ct) && r <= rt) {
+    return { ...d, path: [[r - 1, other(ct)], [r, other(ct)], ...column(r, rt - 1, ct), ...path] }
+  }
+  return d
+}
+
 const touches = (line: string, dot: string) => lineDots(line).includes(dot)
 
 // Apply a route drawn down to the destination row: sideways steps become revealed lines,
