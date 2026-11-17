@@ -21,7 +21,7 @@ export type State = {
   strategy: Strategy
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 9, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
+export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
