@@ -35,7 +35,8 @@ const touches = (line: string, dot: string) => {
 
 // Apply a drawn route to the board: sideways steps become revealed lines, dots passed
 // straight through become known-empty. The route is taken as truth, so anything it
-// contradicts is dropped.
+// contradicts is dropped. Only a route that reaches the destination row marks its
+// start as traced; a partial one tells us nothing about the rows below it.
 export function commit(state: State, path: Node[]): State {
   let lines = [...state.lines]
   const empty = new Set(state.empty)
@@ -58,7 +59,8 @@ export function commit(state: State, path: Node[]): State {
     }
   }
   const start = path[0][1]
-  const played = state.played.includes(start) ? state.played : [...state.played, start]
+  const complete = path[path.length - 1][0] === state.m
+  const played = !complete || state.played.includes(start) ? state.played : [...state.played, start]
   return { ...state, lines, empty: [...empty], played }
 }
 

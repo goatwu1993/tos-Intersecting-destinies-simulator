@@ -31,6 +31,41 @@ function useUrlState(): [State, (s: State) => void] {
   return [state, update]
 }
 
+// Edits are local until blur or Enter, so typing through intermediate values
+// (e.g. clearing the field) can't shrink the board and drop lines.
+function NumberField(props: {
+  label: string
+  min: number
+  max: number
+  value: number
+  onCommit: (v: number) => void
+}) {
+  const { label, min, max, value, onCommit } = props
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => setDraft(String(value)), [value])
+  const commit = () => {
+    const v = parseInt(draft, 10)
+    if (!Number.isFinite(v)) return setDraft(String(value))
+    const clamped = Math.min(max, Math.max(min, v))
+    setDraft(String(clamped))
+    if (clamped !== value) onCommit(clamped)
+  }
+  return (
+    <label>
+      {label}
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+      />
+    </label>
+  )
+}
+
 export default function App() {
   const [state, setState] = useUrlState()
   const { n, m, x, played, dest } = state
@@ -40,7 +75,7 @@ export default function App() {
 
   const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [n, m, lines, played])
   const blocked = useMemo(() => new Set([...empty, ...traces.flatMap((t) => t.straight)]), [empty, traces])
-  const result = useMemo(() => analyze(board, lines, played, empty), [n, m, x, lines, played, empty])
+  const result = useMemo(() => analyze(board, lines, blocked), [n, m, x, lines, blocked])
 
   const lineEnds = useMemo(() => {
     const s = new Set<string>()
@@ -51,6 +86,10 @@ export default function App() {
     return s
   }, [lines])
 
+  // A new line can't touch another line's end or a dot already known to have no line.
+  const lineConflict = (r: number, c: number) =>
+    [dotKey(r, c), dotKey(r, c + 1)].some((d) => lineEnds.has(d) || blocked.has(d))
+
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
   const width = PAD_X * 2 + (n - 1) * GX
@@ -59,9 +98,8 @@ export default function App() {
   const toggleLine = (r: number, c: number) => {
     const k = lineKey(r, c)
     if (lines.has(k)) return setState({ ...state, lines: state.lines.filter((l) => l !== k) })
-    if (lineEnds.has(dotKey(r, c)) || lineEnds.has(dotKey(r, c + 1))) return
-    const ends = [dotKey(r, c), dotKey(r, c + 1)]
-    setState({ ...state, lines: [...state.lines, k], empty: state.empty.filter((d) => !ends.includes(d)) })
+    if (lineConflict(r, c)) return
+    setState({ ...state, lines: [...state.lines, k] })
   }
   const toggleEmpty = (r: number, c: number) => {
     const k = dotKey(r, c)
@@ -69,12 +107,14 @@ export default function App() {
     if (lineEnds.has(k)) return
     setState({ ...state, empty: [...state.empty, k] })
   }
-  // Clicking a traced start removes its route and what it revealed; clicking an untraced one traces it.
-  const togglePlayed = (s: number) =>
-    setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
+  // Clicking a traced start removes its route and what it revealed. Untraced starts are
+  // traced only by dragging a full route, so a click alone never invents one.
+  const removePlayed = (s: number) => {
+    if (played.includes(s)) setState(removeRoute(state, s))
+  }
   const resetBoard = () => setState({ ...state, lines: [], empty: [], played: [] })
 
-  // Dragging from a start draws a route; releasing without moving toggles the trace.
+  // Dragging from a start draws a route; releasing without moving removes a traced one.
   const svgRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<Node[] | null>(null)
   const nodeAt = (e: React.PointerEvent): Node => {
@@ -95,7 +135,7 @@ export default function App() {
   }
   const onUp = () => {
     if (!drag) return
-    if (drag.length === 1) togglePlayed(drag[0][1])
+    if (drag.length === 1) removePlayed(drag[0][1])
     else setState(commit(state, drag))
     setDrag(null)
   }
@@ -111,7 +151,7 @@ export default function App() {
           Drag from a start down the board to draw a route you saw (sideways steps become lines,
           straight steps mark dots as having no line). Or click between two dots to toggle a line,
           click a vertical segment to mark that dot as having no line, click a traced start to remove its route (and the lines and
-          no-line dots only it revealed), click an untraced start to trace it, and click a destination to target it.
+          no-line dots only it revealed), and click a destination to target it.
         </p>
       </header>
 
@@ -195,7 +235,7 @@ export default function App() {
               Array.from({ length: n - 1 }, (_, c) => {
                 const k = lineKey(r, c)
                 const on = lines.has(k)
-                const conflict = !on && (lineEnds.has(dotKey(r, c)) || lineEnds.has(dotKey(r, c + 1)))
+                const conflict = !on && lineConflict(r, c)
                 return (
                   <rect
                     key={k}
@@ -208,7 +248,11 @@ export default function App() {
                     onClick={() => toggleLine(r, c)}
                   >
                     <title>
-                      {on ? 'Remove line' : conflict ? 'Would share an endpoint with another line' : 'Reveal line'}
+                      {on
+                        ? 'Remove line'
+                        : conflict
+                          ? 'Conflicts with another line or a dot known to have no line'
+                          : 'Reveal line'}
                     </title>
                   </rect>
                 )
@@ -259,42 +303,27 @@ export default function App() {
         <aside className="panel">
           <section>
             <h2>Board</h2>
-            <label>
-              Columns (n)
-              <input
-                type="number"
-                min={LIMITS.n[0]}
-                max={LIMITS.n[1]}
-                value={n}
-                onChange={(e) => {
-                  const v = Math.min(LIMITS.n[1], Math.max(LIMITS.n[0], +e.target.value || LIMITS.n[0]))
-                  setState({ ...state, n: v })
-                }}
-              />
-            </label>
-            <label>
-              Dot rows (m)
-              <input
-                type="number"
-                min={LIMITS.m[0]}
-                max={LIMITS.m[1]}
-                value={m}
-                onChange={(e) => {
-                  const v = Math.min(LIMITS.m[1], Math.max(LIMITS.m[0], +e.target.value || LIMITS.m[0]))
-                  setState({ ...state, m: v })
-                }}
-              />
-            </label>
-            <label>
-              Total lines (x)
-              <input
-                type="number"
-                min={0}
-                max={m * (n - 1)}
-                value={x}
-                onChange={(e) => setState({ ...state, x: Math.max(0, +e.target.value || 0) })}
-              />
-            </label>
+            <NumberField
+              label="Columns (n)"
+              min={LIMITS.n[0]}
+              max={LIMITS.n[1]}
+              value={n}
+              onCommit={(v) => setState({ ...state, n: v })}
+            />
+            <NumberField
+              label="Dot rows (m)"
+              min={LIMITS.m[0]}
+              max={LIMITS.m[1]}
+              value={m}
+              onCommit={(v) => setState({ ...state, m: v })}
+            />
+            <NumberField
+              label="Total lines (x)"
+              min={0}
+              max={m * (n - 1)}
+              value={x}
+              onCommit={(v) => setState({ ...state, x: v })}
+            />
             <div className="buttons">
               <button onClick={() => setState(DEFAULT)}>Reset all</button>
               <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>Copy link</button>

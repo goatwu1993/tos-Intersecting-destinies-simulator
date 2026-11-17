@@ -30,7 +30,7 @@ export function normalize(s: State): State {
   const ends = new Set<string>()
   for (const k of s.lines) {
     const [r, c] = k.split('.').map(Number)
-    if (!(r >= 0 && r < m && c >= 0 && c < n - 1)) continue
+    if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n - 1)) continue
     const a = `${r}.${c}`
     const b = `${r}.${c + 1}`
     if (ends.has(a) || ends.has(b)) continue // shares an endpoint: invalid
@@ -38,11 +38,14 @@ export function normalize(s: State): State {
     lines.push(`${r}.${c}`)
   }
   // a dot can't be both a line endpoint and empty
-  const empty = [...new Set(s.empty)].filter((k) => {
+  const empty: string[] = []
+  for (const k of s.empty) {
     const [r, c] = k.split('.').map(Number)
-    return r >= 0 && r < m && c >= 0 && c < n && !ends.has(k)
-  })
-  const played = [...new Set(s.played.filter((p) => p >= 0 && p < n))].sort((a, b) => a - b)
+    if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n)) continue
+    const d = `${r}.${c}`
+    if (!ends.has(d) && !empty.includes(d)) empty.push(d)
+  }
+  const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
   return { n, m, x, lines, empty, played, dest: Math.min(s.dest, n - 1) }
 }
 

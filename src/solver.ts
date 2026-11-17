@@ -100,42 +100,40 @@ export type Analysis =
       prob: number[][]
     }
 
-export function analyze(board: Board, lines: Set<string>, played: number[], empty: Set<string>): Analysis {
+// blocked: dots known to have no line (marked empty, or passed straight through by a traced route)
+export function analyze(board: Board, lines: Set<string>, blocked: Set<string>): Analysis {
   const { n, m, x } = board
   const remaining = x - lines.size
   if (remaining < 0) return { ok: false, error: `${lines.size} lines revealed but only ${x} exist.` }
 
-  const blocked = new Set(empty)
-  for (const s of played) for (const d of trace(board, lines, s).straight) blocked.add(d)
-
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
 
-  // dp[pos * (R+1) + used] = number of partial layouts
+  // dp[used][start * n + pos] = number of partial layouts using `used` hidden lines
+  // that take `start` to column `pos`; all starts advance together, row by row.
   const R = remaining
-  const prob: number[][] = []
-  let layouts = 0
-  for (let s = 0; s < n; s++) {
-    let dp = new Float64Array(n * (R + 1))
-    dp[s * (R + 1)] = 1
-    for (const opts of rows) {
-      const next = new Float64Array(n * (R + 1))
-      for (let pos = 0; pos < n; pos++) {
-        for (let u = 0; u <= R; u++) {
-          const w = dp[pos * (R + 1) + u]
-          if (!w) continue
-          for (const o of opts) {
-            if (u + o.k > R) continue
-            next[o.map[pos] * (R + 1) + u + o.k] += w
-          }
+  let dp = Array.from({ length: R + 1 }, () => new Float64Array(n * n))
+  for (let s = 0; s < n; s++) dp[0][s * n + s] = 1
+  for (const opts of rows) {
+    const next = Array.from({ length: R + 1 }, () => new Float64Array(n * n))
+    for (let u = 0; u <= R; u++) {
+      const cur = dp[u]
+      if (!cur.some(Boolean)) continue
+      for (const o of opts) {
+        if (u + o.k > R) continue
+        const out = next[u + o.k]
+        for (let s = 0; s < n; s++) {
+          for (let pos = 0; pos < n; pos++) out[s * n + o.map[pos]] += cur[s * n + pos]
         }
       }
-      dp = next
     }
-    const ends = Array.from({ length: n }, (_, d) => dp[d * (R + 1) + R])
-    const total = ends.reduce((a, b) => a + b, 0)
-    layouts = total
-    prob.push(ends.map((e) => (total ? e / total : 0)))
+    dp = next
   }
+
+  const final = dp[R]
+  // every layout sends start 0 somewhere, so its row sums to the layout count
+  let layouts = 0
+  for (let d = 0; d < n; d++) layouts += final[d]
   if (!layouts) return { ok: false, error: 'No layout of the hidden lines is consistent with this board.' }
+  const prob = Array.from({ length: n }, (_, s) => Array.from({ length: n }, (_, d) => final[s * n + d] / layouts))
   return { ok: true, layouts, remaining, prob }
 }
