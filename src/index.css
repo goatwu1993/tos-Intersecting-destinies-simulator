@@ -84,8 +84,9 @@ h1 {
   align-items: flex-start;
 }
 
-.presets {
-  margin-bottom: 16px;
+.presets .buttons {
+  margin: 0 0 12px;
+  justify-content: center;
 }
 
 .board-wrap {
@@ -229,16 +230,14 @@ h1 {
   gap: 16px;
 }
 
-.panel section,
-.presets {
+.panel section {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px;
 }
 
-.panel h2,
-.presets h2 {
+.panel h2 {
   margin: 0 0 10px;
   font-size: 14px;
   text-transform: uppercase;
@@ -419,8 +418,7 @@ button:hover {
   .panel {
     gap: 12px;
   }
-  .panel section,
-  .presets {
+  .panel section {
     padding: 12px;
   }
   button {
