@@ -167,7 +167,10 @@ export default function App() {
   // its route and what it revealed.
   const togglePlayed = (s: number) =>
     setState(played.includes(s) ? removeRoute(state, s) : { ...state, played: [...played, s] })
-  const resetBoard = () => setState({ ...state, lines: [], empty: [], played: [] })
+  const resetBoard = () => {
+    setClick(null)
+    setState({ ...state, lines: [], empty: [], played: [] })
+  }
 
   // Dragging from a start draws a route; releasing without ever leaving the start toggles
   // the trace. Dragging away and back onto the start cancels instead.
@@ -454,7 +457,10 @@ export default function App() {
                   className={n === 6 && m === 5 && state.x === levelLines(l) ? 'on' : ''}
                   aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
                   title={t.level(l, levelLines(l))}
-                  onClick={() => setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })}
+                  onClick={() => {
+                    setClick(null)
+                    setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], empty: [], played: [] })
+                  }}
                 >
                   {l}
                 </button>
@@ -486,7 +492,10 @@ export default function App() {
               onCommit={(v) => setState({ ...state, x: v })}
             />
             <div className="buttons">
-              <button onClick={() => setState({ ...DEFAULT, lang })}>{t.resetAll}</button>
+              <button onClick={() => {
+                setClick(null)
+                setState({ ...DEFAULT, lang })
+              }}>{t.resetAll}</button>
               <button onClick={() => navigator.clipboard?.writeText(window.location.href)}>{t.copyLink}</button>
             </div>
           </section>
