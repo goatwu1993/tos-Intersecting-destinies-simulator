@@ -4,6 +4,8 @@
 // e dots known to have no line ("row.col"), p played/traced starts,
 // d selected destination.
 
+import { key, parseKey } from './solver.ts'
+
 export type State = {
   n: number
   m: number
@@ -24,29 +26,30 @@ const int = (v: string | null, def: number, min: number, max: number) => {
 export const LIMITS = { n: [2, 10], m: [1, 12] } as const
 
 export function normalize(s: State): State {
-  const { n, m } = s
-  const x = Math.min(s.x, m * (n - 1))
+  // x is kept as entered even if the board is too small for it; it's capped where used,
+  // so shrinking the board and growing it back doesn't lose the value.
+  const { n, m, x } = s
   const lines: string[] = []
   const ends = new Set<string>()
   for (const k of s.lines) {
-    const [r, c] = k.split('.').map(Number)
+    const [r, c] = parseKey(k)
     if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n - 1)) continue
-    const a = `${r}.${c}`
-    const b = `${r}.${c + 1}`
+    const a = key(r, c)
+    const b = key(r, c + 1)
     if (ends.has(a) || ends.has(b)) continue // shares an endpoint: invalid
     ends.add(a).add(b)
-    lines.push(`${r}.${c}`)
+    lines.push(a)
   }
   // a dot can't be both a line endpoint and empty
-  const empty: string[] = []
+  const empty = new Set<string>()
   for (const k of s.empty) {
-    const [r, c] = k.split('.').map(Number)
+    const [r, c] = parseKey(k)
     if (!(Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < m && c >= 0 && c < n)) continue
-    const d = `${r}.${c}`
-    if (!ends.has(d) && !empty.includes(d)) empty.push(d)
+    const d = key(r, c)
+    if (!ends.has(d)) empty.add(d)
   }
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  return { n, m, x, lines, empty, played, dest: Math.min(s.dest, n - 1) }
+  return { n, m, x, lines, empty: [...empty], played, dest: Math.min(s.dest, n - 1) }
 }
 
 export function read(search: string): State {

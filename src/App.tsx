@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { commit, extend, removeRoute, type Node } from './route.ts'
-import { analyze, dotKey, lineKey, trace } from './solver.ts'
+import { analyze, key, maxLines, parseKey, trace } from './solver.ts'
 import { DEFAULT, LIMITS, normalize, read, write, type State } from './urlState.ts'
 
 const GX = 64
@@ -14,6 +14,13 @@ const pct = (p: number) => {
   const v = p * 100
   if (v === 0 || v === 100) return `${v}%`
   return v < 0.1 ? '<0.1%' : v > 99.9 ? '>99.9%' : `${v.toFixed(1)}%`
+}
+
+// Counts above 2^53 aren't exact in floating point, so show them as approximate.
+const formatCount = (v: number) => {
+  if (v <= Number.MAX_SAFE_INTEGER) return v.toLocaleString()
+  const [mant, exp] = v.toExponential(2).split('e')
+  return `≈ ${mant} × 10^${Number(exp)}`
 }
 
 function useUrlState(): [State, (s: State) => void] {
@@ -68,20 +75,21 @@ function NumberField(props: {
 
 export default function App() {
   const [state, setState] = useUrlState()
-  const { n, m, x, played, dest } = state
+  const { n, m, played, dest } = state
+  const x = Math.min(state.x, maxLines(n, m))
   const lines = useMemo(() => new Set(state.lines), [state.lines])
   const empty = useMemo(() => new Set(state.empty), [state.empty])
-  const board = { n, m, x }
+  const board = useMemo(() => ({ n, m, x }), [n, m, x])
 
-  const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [n, m, lines, played])
+  const traces = useMemo(() => played.map((s) => trace(board, lines, s)), [board, lines, played])
   const blocked = useMemo(() => new Set([...empty, ...traces.flatMap((t) => t.straight)]), [empty, traces])
-  const result = useMemo(() => analyze(board, lines, blocked), [n, m, x, lines, blocked])
+  const result = useMemo(() => analyze(board, lines, blocked), [board, lines, blocked])
 
   const lineEnds = useMemo(() => {
     const s = new Set<string>()
     for (const k of lines) {
-      const [r, c] = k.split('.').map(Number)
-      s.add(dotKey(r, c)).add(dotKey(r, c + 1))
+      const [r, c] = parseKey(k)
+      s.add(key(r, c)).add(key(r, c + 1))
     }
     return s
   }, [lines])
@@ -89,7 +97,7 @@ export default function App() {
   // A new line can't touch another line's end or a dot marked as having no line. Dots a
   // traced route merely passes through are allowed: the trace reroutes through the new line.
   const lineConflict = (r: number, c: number) =>
-    [dotKey(r, c), dotKey(r, c + 1)].some((d) => lineEnds.has(d) || empty.has(d))
+    [key(r, c), key(r, c + 1)].some((d) => lineEnds.has(d) || empty.has(d))
 
   const cx = (c: number) => PAD_X + c * GX
   const cy = (r: number) => PAD_TOP + (r + 1) * GY // r = -1 start post, r = m destination post
@@ -97,13 +105,13 @@ export default function App() {
   const height = PAD_TOP + PAD_BOTTOM + (m + 1) * GY
 
   const toggleLine = (r: number, c: number) => {
-    const k = lineKey(r, c)
+    const k = key(r, c)
     if (lines.has(k)) return setState({ ...state, lines: state.lines.filter((l) => l !== k) })
     if (lineConflict(r, c)) return
     setState({ ...state, lines: [...state.lines, k] })
   }
   const toggleEmpty = (r: number, c: number) => {
-    const k = dotKey(r, c)
+    const k = key(r, c)
     if (empty.has(k)) return setState({ ...state, empty: state.empty.filter((d) => d !== k) })
     if (lineEnds.has(k)) return
     setState({ ...state, empty: [...state.empty, k] })
@@ -179,7 +187,7 @@ export default function App() {
 
             {/* revealed lines */}
             {state.lines.map((k) => {
-              const [r, c] = k.split('.').map(Number)
+              const [r, c] = parseKey(k)
               return <line key={k} className="rung" x1={cx(c)} y1={cy(r)} x2={cx(c + 1)} y2={cy(r)} />
             })}
 
@@ -203,7 +211,7 @@ export default function App() {
             {/* dots */}
             {Array.from({ length: m }, (_, r) =>
               Array.from({ length: n }, (_, c) => {
-                const k = dotKey(r, c)
+                const k = key(r, c)
                 const cls = lineEnds.has(k) ? 'dot end' : blocked.has(k) ? 'dot empty' : 'dot'
                 return <circle key={k} className={cls} cx={cx(c)} cy={cy(r)} r={6} />
               }),
@@ -212,7 +220,7 @@ export default function App() {
             {/* clickable vertical segments: mark a dot as having no line */}
             {Array.from({ length: m }, (_, r) =>
               Array.from({ length: n }, (_, c) => {
-                const k = dotKey(r, c)
+                const k = key(r, c)
                 const on = empty.has(k)
                 const conflict = !on && lineEnds.has(k)
                 return (
@@ -235,7 +243,7 @@ export default function App() {
             {/* clickable gaps between dots */}
             {Array.from({ length: m }, (_, r) =>
               Array.from({ length: n - 1 }, (_, c) => {
-                const k = lineKey(r, c)
+                const k = key(r, c)
                 const on = lines.has(k)
                 const conflict = !on && lineConflict(r, c)
                 return (
@@ -322,7 +330,7 @@ export default function App() {
             <NumberField
               label="Total lines (x)"
               min={0}
-              max={m * (n - 1)}
+              max={maxLines(n, m)}
               value={x}
               onCommit={(v) => setState({ ...state, x: v })}
             />
@@ -338,7 +346,7 @@ export default function App() {
               <>
                 <p className="meta">
                   {result.remaining} hidden line{result.remaining === 1 ? '' : 's'} ·{' '}
-                  {result.layouts.toLocaleString()} consistent layout{result.layouts === 1 ? '' : 's'}
+                  {formatCount(result.layouts)} consistent layout{result.layouts === 1 ? '' : 's'}
                 </p>
                 <ol className="bars">
                   {probs.map((p, s) => (

@@ -10,8 +10,12 @@
 
 export type Board = { n: number; m: number; x: number }
 
-export const lineKey = (r: number, c: number) => `${r}.${c}`
-export const dotKey = (r: number, c: number) => `${r}.${c}`
+// Dots and lines share the "row.col" key; a line's key is its left dot.
+export const key = (r: number, c: number) => `${r}.${c}`
+export const parseKey = (k: string) => k.split('.').map(Number) as [number, number]
+
+// Lines can't share a dot, so each row fits at most floor(n / 2).
+export const maxLines = (n: number, m: number) => m * Math.floor(n / 2)
 
 export type Trace = {
   end: number
@@ -30,16 +34,16 @@ export function trace(board: Board, lines: Set<string>, start: number): Trace {
   const straight: string[] = []
   const used: string[] = []
   for (let r = 0; r < m; r++) {
-    if (c > 0 && lines.has(lineKey(r, c - 1))) {
+    if (c > 0 && lines.has(key(r, c - 1))) {
       points.push([r, c], [r, c - 1])
-      used.push(lineKey(r, c - 1))
+      used.push(key(r, c - 1))
       c -= 1
-    } else if (lines.has(lineKey(r, c))) {
+    } else if (lines.has(key(r, c))) {
       points.push([r, c], [r, c + 1])
-      used.push(lineKey(r, c))
+      used.push(key(r, c))
       c += 1
     } else {
-      straight.push(dotKey(r, c))
+      straight.push(key(r, c))
     }
   }
   points.push([m, c])
@@ -53,16 +57,16 @@ function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<strin
   const used = new Array<boolean>(n).fill(false)
   const fixed: number[] = []
   for (let c = 0; c < n - 1; c++) {
-    if (lines.has(lineKey(r, c))) {
+    if (lines.has(key(r, c))) {
       fixed.push(c)
       used[c] = used[c + 1] = true
     }
   }
   const free: number[] = []
   for (let c = 0; c < n - 1; c++) {
-    if (lines.has(lineKey(r, c))) continue
+    if (lines.has(key(r, c))) continue
     if (used[c] || used[c + 1]) continue
-    if (blocked.has(dotKey(r, c)) || blocked.has(dotKey(r, c + 1))) continue
+    if (blocked.has(key(r, c)) || blocked.has(key(r, c + 1))) continue
     free.push(c)
   }
   const out: RowOption[] = []

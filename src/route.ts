@@ -1,4 +1,4 @@
-import { dotKey, lineKey, trace } from './solver.ts'
+import { key, parseKey, trace } from './solver.ts'
 import type { State } from './urlState.ts'
 
 // A drawn route is a list of grid nodes [row, col]; row -1 is the start post, row m the destination post.
@@ -29,17 +29,19 @@ export function extend(path: Node[], target: Node, m: number): Node[] {
 }
 
 const touches = (line: string, dot: string) => {
-  const [r, c] = line.split('.').map(Number)
-  return dotKey(r, c) === dot || dotKey(r, c + 1) === dot
+  const [r, c] = parseKey(line)
+  return key(r, c) === dot || key(r, c + 1) === dot
 }
 
-// Apply a drawn route to the board: sideways steps become revealed lines, dots passed
-// straight through become known-empty. The route is taken as truth, so anything it
-// contradicts is dropped. Only a route that reaches the destination row marks its
-// start as traced; a partial one tells us nothing about the rows below it.
+// Apply a drawn route to the board: sideways steps become revealed lines, and the route
+// is taken as truth, so anything it contradicts is dropped. A route that reaches the
+// destination row marks its start as traced, which already implies the dots it passes
+// straight through (and lets lines be clicked onto it, like a clicked trace). A partial
+// route can't be traced, so its straight dots are stored as marked-empty instead.
 export function commit(state: State, path: Node[]): State {
   let lines = [...state.lines]
   const empty = new Set(state.empty)
+  const straight: string[] = []
   for (let i = 0; i < path.length; i++) {
     const [r, c] = path[i]
     if (r < 0 || r >= state.m) continue
@@ -47,19 +49,20 @@ export function commit(state: State, path: Node[]): State {
     const next = path[i + 1]
     if (prev && prev[0] === r) continue // far end of a line already handled
     if (next && next[0] === r) {
-      const k = lineKey(r, Math.min(c, next[1]))
-      const ends = [dotKey(r, c), dotKey(r, next[1])]
+      const k = key(r, Math.min(c, next[1]))
+      const ends = [key(r, c), key(r, next[1])]
       lines = lines.filter((l) => l === k || !ends.some((d) => touches(l, d)))
       if (!lines.includes(k)) lines.push(k)
       ends.forEach((d) => empty.delete(d))
     } else if (next) {
-      const d = dotKey(r, c)
+      const d = key(r, c)
       lines = lines.filter((l) => !touches(l, d))
-      empty.add(d)
+      straight.push(d)
     }
   }
   const start = path[0][1]
   const complete = path[path.length - 1][0] === state.m
+  if (!complete) straight.forEach((d) => empty.add(d))
   const played = !complete || state.played.includes(start) ? state.played : [...state.played, start]
   return { ...state, lines, empty: [...empty], played }
 }
