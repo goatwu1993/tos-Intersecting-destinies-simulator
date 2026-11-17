@@ -51,9 +51,9 @@ export function trace(board: Board, lines: Set<string>, start: number): Trace {
 }
 
 // Each option for a row: how many unknown lines it adds and the resulting column mapping.
-type RowOption = { k: number; map: number[] }
+export type RowOption = { k: number; map: number[] }
 
-function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<string>): RowOption[] {
+export function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<string>): RowOption[] {
   const used = new Array<boolean>(n).fill(false)
   const fixed: number[] = []
   for (let c = 0; c < n - 1; c++) {
