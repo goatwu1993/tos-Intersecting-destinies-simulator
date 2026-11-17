@@ -2,8 +2,9 @@
 //   ?n=6&m=5&x=9&l=3.0,4.0&e=0.0,1.0,2.0&p=0&d=0
 // n columns, m dot rows, x total lines, l revealed lines ("row.col"),
 // e dots known to have no line ("row.col"), p played/traced starts,
-// d selected destination.
+// d selected destination. lang is the UI language (zh-TW when omitted, or en-US).
 
+import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
 import { key, parseKey } from './solver.ts'
 
 export type State = {
@@ -14,9 +15,10 @@ export type State = {
   empty: string[]
   played: number[]
   dest: number
+  lang: Lang
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 9, lines: [], empty: [], played: [], dest: 0 }
+export const DEFAULT: State = { n: 6, m: 5, x: 9, lines: [], empty: [], played: [], dest: 0, lang: DEFAULT_LANG }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
@@ -49,7 +51,7 @@ export function normalize(s: State): State {
     if (!ends.has(d)) empty.add(d)
   }
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  return { n, m, x, lines, empty: [...empty], played, dest: Math.min(s.dest, n - 1) }
+  return { n, m, x, lines, empty: [...empty], played, dest: Math.min(s.dest, n - 1), lang: s.lang }
 }
 
 export function read(search: string): State {
@@ -65,6 +67,7 @@ export function read(search: string): State {
     empty: list('e'),
     played: list('p').map(Number),
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
+    lang: parseLang(q.get('lang')),
   })
 }
 
@@ -77,6 +80,7 @@ export function write(s: State): string {
   if (s.empty.length) q.set('e', s.empty.join(','))
   if (s.played.length) q.set('p', s.played.join(','))
   q.set('d', String(s.dest))
+  if (s.lang !== DEFAULT_LANG) q.set('lang', s.lang)
   // keep commas readable
   return '?' + q.toString().replace(/%2C/g, ',')
 }

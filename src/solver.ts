@@ -95,7 +95,7 @@ function rowOptions(n: number, r: number, lines: Set<string>, blocked: Set<strin
 }
 
 export type Analysis =
-  | { ok: false; error: string }
+  | { ok: false; error: 'tooManyLines' | 'noLayout' } // translated by the UI
   | {
       ok: true
       layouts: number // number of consistent layouts for the unknown lines
@@ -108,7 +108,7 @@ export type Analysis =
 export function analyze(board: Board, lines: Set<string>, blocked: Set<string>): Analysis {
   const { n, m, x } = board
   const remaining = x - lines.size
-  if (remaining < 0) return { ok: false, error: `${lines.size} lines revealed but only ${x} exist.` }
+  if (remaining < 0) return { ok: false, error: 'tooManyLines' }
 
   const rows = Array.from({ length: m }, (_, r) => rowOptions(n, r, lines, blocked))
 
@@ -137,7 +137,7 @@ export function analyze(board: Board, lines: Set<string>, blocked: Set<string>):
   // every layout sends start 0 somewhere, so its row sums to the layout count
   let layouts = 0
   for (let d = 0; d < n; d++) layouts += final[d]
-  if (!layouts) return { ok: false, error: 'No layout of the hidden lines is consistent with this board.' }
+  if (!layouts) return { ok: false, error: 'noLayout' }
   const prob = Array.from({ length: n }, (_, s) => Array.from({ length: n }, (_, d) => final[s * n + d] / layouts))
   return { ok: true, layouts, remaining, prob }
 }
