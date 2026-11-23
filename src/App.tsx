@@ -4,8 +4,8 @@ import { autoExtend, clickLine, clickSegment, commit, complete, extend, removeRo
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
 import type { OddsInput } from './odds.worker.ts'
-import { key, maxLines, parseKey, playable } from './solver.ts'
-import { DEFAULT, LEVELS, LIMITS, derive, levelBoard, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
+import { key, parseKey } from './solver.ts'
+import { DEFAULT, LEVELS, derive, levelBoard, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
 const GY = 56
@@ -29,7 +29,7 @@ const formatCount = (v: number, lang: Lang) => {
 
 // Why the board isn't what was asked for: an edit no layout agrees with, a route that
 // contradicts one already traced, or a link that was cleaned up on load.
-type Notice = 'impossible' | 'contradicts' | 'adjusted' | 'shape' | 'drawRoute'
+type Notice = 'impossible' | 'contradicts' | 'adjusted' | 'drawRoute'
 type Saved = { state: State; known: Known; notice: Notice | null }
 
 const load = (): Saved => {
@@ -81,42 +81,6 @@ function useUrlState() {
 
 // Edits are local until blur or Enter, so typing through intermediate values
 // (e.g. clearing the field) can't shrink the board and drop lines.
-function NumberField(props: {
-  label: string
-  min: number
-  max: number
-  value: number
-  disabled?: boolean
-  onCommit: (v: number) => boolean
-}) {
-  const { label, min, max, value, disabled, onCommit } = props
-  const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
-  // Always report the entered value: `value` may be a capped view of a larger stored
-  // value (total lines), so entering the shown number must still save it.
-  const apply = () => {
-    const v = parseInt(draft, 10)
-    if (!Number.isFinite(v)) return setDraft(String(value))
-    const clamped = Math.min(max, Math.max(min, v))
-    setDraft(String(onCommit(clamped) ? clamped : value))
-  }
-  return (
-    <label>
-      {label}
-      <input
-        type="number"
-        min={min}
-        max={max}
-        value={draft}
-        disabled={disabled}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={apply}
-        onKeyDown={(e) => e.key === 'Enter' && apply()}
-      />
-    </label>
-  )
-}
-
 export default function App() {
   const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
   const { n, m, played, dest, lang, strategy } = state
@@ -176,21 +140,6 @@ export default function App() {
   // route and what it revealed.
   // Tapping a start with no route can't trace it any more, so it says how to.
   const untrace = (s: number) => (played.includes(s) ? setState(removeRoute(state, s)) : setNotice('drawRoute'))
-  // There can't be fewer lines in total than are already revealed, or more than the board
-  // holds. A board too small for the minimum shows its capacity, which can't be changed.
-  const minX = Math.max(LIMITS.x[0], lines.size)
-  const maxX = Math.min(LIMITS.x[1], maxLines(n, m))
-  // Routes seen on one board shape don't carry over to another, so a new shape starts
-  // empty, as a level preset does.
-  const resize = (size: { n: number } | { m: number }) => {
-    const next = { ...state, ...size }
-    if (next.n === n && next.m === m) return true
-    if (!playable(next.n, next.m, next.x)) {
-      setNotice('shape')
-      return false
-    }
-    return setState({ ...next, lines: [], played: [] })
-  }
   const resetBoard = () => {
     setClick(null)
     setState({ ...state, lines: [], played: [] })
@@ -239,7 +188,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [drafting])
-  // A draft is drawn against one board; a new shape (resize) or a back/forward load drops it.
+  // A draft is drawn against one board; a new level or a back/forward load drops it.
   useEffect(() => {
     setClick(null)
     setDrag(null)
@@ -333,23 +282,7 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <div className="counter">
-              <button
-                aria-label={t.fewerLines}
-                disabled={x <= minX}
-                onClick={() => setState({ ...state, x: x - 1 })}
-              >
-                −
-              </button>
-              {t.linesRevealed(lines.size, x)}
-              <button
-                aria-label={t.moreLines}
-                disabled={x >= maxX}
-                onClick={() => setState({ ...state, x: x + 1 })}
-              >
-                +
-              </button>
-            </div>
+            <div className="counter">{t.linesRevealed(lines.size, x)}</div>
             <svg
               ref={svgRef}
               className={`board ${drag ? 'dragging' : ''}`}
@@ -521,28 +454,6 @@ export default function App() {
 
           <section>
             <h2>{t.board}</h2>
-            <NumberField
-              label={t.columns}
-              min={LIMITS.n[0]}
-              max={LIMITS.n[1]}
-              value={n}
-              onCommit={(v) => resize({ n: v })}
-            />
-            <NumberField
-              label={t.dotRows}
-              min={LIMITS.m[0]}
-              max={LIMITS.m[1]}
-              value={m}
-              onCommit={(v) => resize({ m: v })}
-            />
-            <NumberField
-              label={t.totalLines}
-              min={minX}
-              max={maxX}
-              value={x}
-              disabled={maxX <= minX}
-              onCommit={(v) => setState({ ...state, x: v })}
-            />
             <div className="buttons">
               <button onClick={() => {
                 setClick(null)

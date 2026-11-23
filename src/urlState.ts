@@ -1,6 +1,7 @@
 // All app state lives in the query string, e.g.
-//   ?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0   or   ?level=5&l=1.0,2.1&p=0&d=0
-// level is a preset level, which sets n, m and x (they're left out of the URL then). n columns, m dot rows, x total lines, l revealed lines ("row.col"), p played/traced starts,
+//   ?level=5&l=1.0,2.1&p=0&d=0
+// level is the preset level, which sets the board (n columns, m dot rows, x total lines; only
+// presets are played). l revealed lines ("row.col"), p played/traced starts,
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
@@ -12,7 +13,6 @@ import {
   maxLines,
   oddsCost,
   parseKey,
-  playable,
   prepare,
   trace,
   type Board,
@@ -22,7 +22,8 @@ import {
 export type Strategy = 'gambler' | 'mathematician'
 
 export type State = {
-  level: number | null // the preset level the board is, if it was picked as one
+  level: number
+  // the level's board, kept alongside it
   n: number
   m: number
   x: number
@@ -34,11 +35,11 @@ export type State = {
 }
 
 // Every level is a 6 × 5 board; levels 1 … 5 have l + 4 lines (5 … 9),
-// and levels 6 … 10 have the same setup as levels 1 … 5.
-const LEVEL_LINES = [5, 6, 7, 8, 9, 5, 6, 7, 8, 9]
+// and levels 6 … 10 and 11 … 15 have the same setup as levels 1 … 5.
+const LEVEL_LINES = [5, 6, 7, 8, 9, 5, 6, 7, 8, 9, 5, 6, 7, 8, 9]
 export const LEVELS = LEVEL_LINES.map((_, i) => i + 1)
 export const levelBoard = (l: number) => ({ n: 6, m: 5, x: LEVEL_LINES[l - 1] })
-const isLevel = (l: number | null): l is number => l !== null && LEVELS.includes(l)
+const isLevel = (l: number) => LEVELS.includes(l)
 
 export const DEFAULT: State = { level: 1, n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
@@ -47,12 +48,9 @@ const int = (v: string | null, def: number, min: number, max: number) => {
   return Number.isFinite(i) ? Math.min(max, Math.max(min, i)) : def
 }
 
-export const LIMITS = { n: [2, 10], m: [1, 12], x: [5, 9] } as const
-
 export function normalize(s: State): State {
-  // x is kept as entered even if the board is too small for it; it's capped where used,
-  // so shrinking the board and growing it back doesn't lose the value.
-  const { n, m, x } = s
+  const level = isLevel(s.level) ? s.level : DEFAULT.level
+  const { n, m, x } = levelBoard(level)
   const lines: string[] = []
   const ends = new Set<string>()
   for (const k of s.lines) {
@@ -71,9 +69,6 @@ export function normalize(s: State): State {
     return ra - rb || ca - cb
   })
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
-  // a level only holds while the board is still that level's (changing n, m or x leaves it)
-  const lb = isLevel(s.level) ? levelBoard(s.level) : null
-  const level = lb && lb.n === n && lb.m === m && lb.x === x ? s.level : null
   return {
     level,
     n,
@@ -134,66 +129,46 @@ export const sameBoard = (a: State, b: State) =>
   a.played.join() === b.played.join()
 
 // `dropped` is set when the link held something that isn't kept as given: lines no route
-// crosses or that overlap, the retired `e` (no-line dots) param, out-of-range values, or
+// crosses or that overlap, the retired `e` (no-line dots) and n, m, x (board) params, an unknown
+// level or out-of-range values, or
 // routes that are impossible (which load as an empty board).
 export type Loaded = { state: State; known: Known; dropped: boolean }
 
 export function read(search: string): Loaded {
   const q = new URLSearchParams(search)
   const list = (k: string) => (q.get(k) ?? '').split(',').filter(Boolean)
-  // A valid level sets the board and any n, m, x given with it are ignored. With no level
-  // and no n, m, x at all, the default level loads.
-  const lv = q.has('level') ? parseInt(q.get('level')!, 10) : null
-  const fromLevel = isLevel(lv)
-  const bare = !q.has('level') && !['n', 'm', 'x'].some((k) => q.has(k))
-  const level = fromLevel ? lv : bare ? DEFAULT.level : null
-  const board = fromLevel
-    ? levelBoard(lv)
-    : {
-        n: int(q.get('n'), DEFAULT.n, ...LIMITS.n),
-        m: int(q.get('m'), DEFAULT.m, ...LIMITS.m),
-        x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
-      }
+  // Only preset levels are played: a link with no level loads the default one, and one with
+  // an unknown level (or the retired n, m, x board params) loads it as a changed link.
+  const lv = q.has('level') ? parseInt(q.get('level')!, 10) : DEFAULT.level
   const lines = list('l')
   const played = list('p').map(Number)
   const s = normalize({
-    level,
-    ...board,
+    ...DEFAULT,
+    level: lv,
     lines,
     played,
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
     lang: parseLang(q.get('lang')),
     strategy: q.get('s') === 'math' ? 'mathematician' : 'gambler',
   })
-  // A board shape that can't be played even empty (every column needs a line, e.g. 5
-  // columns on 1 row) loads the default board; a playable one whose routes can't happen
-  // keeps its settings but loads empty.
-  if (!playable(s.n, s.m, s.x)) return { ...derive({ ...DEFAULT, lang: s.lang, strategy: s.strategy })!, dropped: true }
+  // routes that can't happen load as an empty board of the same level
   const d = derive(s)
   if (!d) return { ...derive({ ...s, lines: [], played: [] })!, dropped: true }
   const { state } = d
   // a number param that was out of range (or not a number) and so was clamped
-  const clamped = (k: string, v: number) => !fromLevel && q.has(k) && q.get(k) !== String(v)
+  const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)
   const dropped =
-    (q.has('level') && !fromLevel) ||
-    list('e').length > 0 ||
+    clamped('level', state.level) ||
+    ['n', 'm', 'x', 'e'].some((k) => q.has(k)) ||
     state.lines.length < lines.length ||
     state.played.length < played.length ||
-    clamped('n', state.n) ||
-    clamped('m', state.m) ||
-    clamped('x', state.x) ||
     clamped('d', state.dest)
   return { ...d, dropped }
 }
 
 export function write(s: State): string {
   const q = new URLSearchParams()
-  if (s.level !== null) q.set('level', String(s.level))
-  else {
-    q.set('n', String(s.n))
-    q.set('m', String(s.m))
-    q.set('x', String(s.x))
-  }
+  q.set('level', String(s.level))
   if (s.lines.length) q.set('l', s.lines.join(','))
   if (s.played.length) q.set('p', s.played.join(','))
   q.set('d', String(s.dest))
