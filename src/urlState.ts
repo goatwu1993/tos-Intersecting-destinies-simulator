@@ -1,6 +1,6 @@
 // All app state lives in the query string, e.g.
-//   ?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0
-// n columns, m dot rows, x total lines, l revealed lines ("row.col"), p played/traced starts,
+//   ?n=6&m=5&x=9&l=1.0,2.1&p=0&d=0   or   ?level=5&l=1.0,2.1&p=0&d=0
+// level is a preset level, which sets n, m and x (they're left out of the URL then). n columns, m dot rows, x total lines, l revealed lines ("row.col"), p played/traced starts,
 // d selected destination, s=math for the mathematician strategy (gambler when omitted). lang is the UI language (zh-TW when omitted, or en-US).
 
 import { DEFAULT_LANG, parseLang, type Lang } from './i18n.ts'
@@ -22,6 +22,7 @@ import {
 export type Strategy = 'gambler' | 'mathematician'
 
 export type State = {
+  level: number | null // the preset level the board is, if it was picked as one
   n: number
   m: number
   x: number
@@ -32,7 +33,13 @@ export type State = {
   strategy: Strategy
 }
 
-export const DEFAULT: State = { n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
+// Every level is a 6 × 5 board; levels 1 … 5 have l + 4 lines (5 … 9),
+// and level 6 has the same setup as level 1.
+export const LEVELS = [1, 2, 3, 4, 5, 6]
+export const levelBoard = (l: number) => ({ n: 6, m: 5, x: l === 6 ? 5 : l + 4 })
+const isLevel = (l: number | null): l is number => l !== null && LEVELS.includes(l)
+
+export const DEFAULT: State = { level: 1, n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
 
 const int = (v: string | null, def: number, min: number, max: number) => {
   const i = v === null ? NaN : parseInt(v, 10)
@@ -63,7 +70,11 @@ export function normalize(s: State): State {
     return ra - rb || ca - cb
   })
   const played = [...new Set(s.played.filter((p) => Number.isInteger(p) && p >= 0 && p < n))].sort((a, b) => a - b)
+  // a level only holds while the board is still that level's (changing n, m or x leaves it)
+  const lb = isLevel(s.level) ? levelBoard(s.level) : null
+  const level = lb && lb.n === n && lb.m === m && lb.x === x ? s.level : null
   return {
+    level,
     n,
     m,
     x,
@@ -129,14 +140,24 @@ export type Loaded = { state: State; known: Known; dropped: boolean }
 export function read(search: string): Loaded {
   const q = new URLSearchParams(search)
   const list = (k: string) => (q.get(k) ?? '').split(',').filter(Boolean)
-  const n = int(q.get('n'), DEFAULT.n, ...LIMITS.n)
-  const m = int(q.get('m'), DEFAULT.m, ...LIMITS.m)
+  // A valid level sets the board and any n, m, x given with it are ignored. With no level
+  // and no n, m, x at all, the default level loads.
+  const lv = q.has('level') ? parseInt(q.get('level')!, 10) : null
+  const fromLevel = isLevel(lv)
+  const bare = !q.has('level') && !['n', 'm', 'x'].some((k) => q.has(k))
+  const level = fromLevel ? lv : bare ? DEFAULT.level : null
+  const board = fromLevel
+    ? levelBoard(lv)
+    : {
+        n: int(q.get('n'), DEFAULT.n, ...LIMITS.n),
+        m: int(q.get('m'), DEFAULT.m, ...LIMITS.m),
+        x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
+      }
   const lines = list('l')
   const played = list('p').map(Number)
   const s = normalize({
-    n,
-    m,
-    x: int(q.get('x'), DEFAULT.x, ...LIMITS.x),
+    level,
+    ...board,
     lines,
     played,
     dest: int(q.get('d'), DEFAULT.dest, 0, 99),
@@ -151,8 +172,9 @@ export function read(search: string): Loaded {
   if (!d) return { ...derive({ ...s, lines: [], played: [] })!, dropped: true }
   const { state } = d
   // a number param that was out of range (or not a number) and so was clamped
-  const clamped = (k: string, v: number) => q.has(k) && q.get(k) !== String(v)
+  const clamped = (k: string, v: number) => !fromLevel && q.has(k) && q.get(k) !== String(v)
   const dropped =
+    (q.has('level') && !fromLevel) ||
     list('e').length > 0 ||
     state.lines.length < lines.length ||
     state.played.length < played.length ||
@@ -165,9 +187,12 @@ export function read(search: string): Loaded {
 
 export function write(s: State): string {
   const q = new URLSearchParams()
-  q.set('n', String(s.n))
-  q.set('m', String(s.m))
-  q.set('x', String(s.x))
+  if (s.level !== null) q.set('level', String(s.level))
+  else {
+    q.set('n', String(s.n))
+    q.set('m', String(s.m))
+    q.set('x', String(s.x))
+  }
   if (s.lines.length) q.set('l', s.lines.join(','))
   if (s.played.length) q.set('p', s.played.join(','))
   q.set('d', String(s.dest))
