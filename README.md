@@ -9,7 +9,7 @@ npm run dev     # local dev server
 npm run build   # static site in dist/ (relative paths, host anywhere)
 ```
 
-URL params: `level` preset level (1–10, each a 6 × 5 board with its own number of lines; only presets are played,
+URL params: `level` preset level (1–15, each a 6 × 5 board with its own number of lines; only presets are played,
 and a link without one loads level 1), `l` revealed lines as `row.col` (0-based, line joins col and col+1), `p` traced
 starts (0-based), `d` selected destination (0-based), `lang` UI language (`zh-TW` by default, or `en-US`). Only
 lines a traced route crosses are kept, dots a route passes straight through are known to have no line, and a state
