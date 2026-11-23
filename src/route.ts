@@ -1,4 +1,4 @@
-import { key, lineDots, trace } from './solver.ts'
+import { countLayouts, key, lineDots, prepare, trace, type Board } from './solver.ts'
 import type { State } from './urlState.ts'
 
 // A drawn route is a list of grid nodes [row, col]; row -1 is the start post, row m the destination post.
@@ -91,6 +91,65 @@ export function clickLine(d: Draft, r: number, c: number): Draft | null {
 }
 
 const touches = (line: string, dot: string) => lineDots(line).includes(dot)
+
+// What a draft says about the board: the lines it takes, and the dots it passes straight
+// through (its two ends are still open).
+function implied(path: Node[], m: number) {
+  const lines: string[] = []
+  const straight: string[] = []
+  for (let i = 0; i + 1 < path.length; i++) {
+    const [r, c] = path[i]
+    const next = path[i + 1]
+    if (next[0] === r) lines.push(key(r, Math.min(c, next[1])))
+    else if (i > 0 && r >= 0 && r < m && path[i - 1][1] === c) straight.push(key(r, c))
+  }
+  return { lines, straight }
+}
+
+// Take every step that is forced: while an open end of the draft (on a dot row) has only one
+// way on that some layout of the lines allows (across a line to the left, to the right, or
+// straight on), take it. So a route follows a revealed line, goes straight past a no-line dot,
+// or past a dot every other way out of is ruled out, without being clicked. Stops at a start /
+// destination, or where there's a real choice. lines / blocked: what the traced routes show.
+export function autoExtend(d: Draft, board: Board, lines: Set<string>, blocked: Set<string>): Draft {
+  const { n, m } = board
+  for (let i = 0; i < 4 * (m + 2); i++) {
+    const own = implied(d.path, m)
+    const L = new Set([...lines, ...own.lines])
+    const B = new Set([...blocked, ...own.straight])
+    const possible = (ls: Set<string>, bs: Set<string>) => countLayouts(prepare(board, ls, bs)) > 0
+    const lineOk = (r: number, c: number) => {
+      if (c < 0 || c >= n - 1) return false
+      const k = key(r, c)
+      const dots = lineDots(k)
+      if (dots.some((x) => B.has(x))) return false
+      if ([...L].some((l) => l !== k && dots.some((x) => touches(l, x)))) return false
+      return L.has(k) || possible(new Set([...L, k]), B)
+    }
+    const straightOk = (r: number, c: number) => {
+      const dot = key(r, c)
+      if ([...L].some((l) => touches(l, dot))) return false
+      return B.has(dot) || possible(L, new Set([...B, dot]))
+    }
+    // the one way on from an open end at node (r, c), or null when there's a choice (or none)
+    const forced = (r: number, c: number, onStraight: () => Draft | null, onLine: (c: number) => Draft | null) => {
+      const ways = [
+        straightOk(r, c) && onStraight,
+        lineOk(r, c - 1) && (() => onLine(c - 1)),
+        lineOk(r, c) && (() => onLine(c)),
+      ].filter((w): w is () => Draft | null => !!w)
+      return ways.length === 1 ? ways[0]() : null
+    }
+    let next: Draft | null = null
+    const [rb, cb] = d.path[d.path.length - 1]
+    if (rb >= 0 && rb < m) next = forced(rb, cb, () => clickSegment(d, rb, cb), (c) => clickLine(d, rb, c))
+    const [rt, ct] = d.path[0]
+    if (!next && rt >= 0 && rt < m) next = forced(rt, ct, () => clickSegment(d, rt - 1, ct), (c) => clickLine(d, rt, c))
+    if (!next || next.path.length <= d.path.length) return d
+    d = next
+  }
+  return d
+}
 
 // Apply a route drawn down to the destination row: sideways steps become revealed lines,
 // and the route replaces what was known along it, including an earlier route from the same
