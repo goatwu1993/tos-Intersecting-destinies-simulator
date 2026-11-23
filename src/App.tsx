@@ -5,7 +5,7 @@ import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
 import type { OddsInput } from './odds.worker.ts'
 import { key, maxLines, parseKey, playable } from './solver.ts'
-import { DEFAULT, LIMITS, derive, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
+import { DEFAULT, LEVELS, LIMITS, derive, levelBoard, normalize, read, sameBoard, write, type Known, type State } from './urlState.ts'
 
 const GX = 64
 const GY = 56
@@ -116,10 +116,6 @@ function NumberField(props: {
     </label>
   )
 }
-
-// Every level is a 6 × 5 board; level l has l + 4 lines (5 … 9).
-const LEVELS = [1, 2, 3, 4, 5]
-const levelLines = (l: number) => l + 4
 
 export default function App() {
   const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
@@ -322,12 +318,12 @@ export default function App() {
                 {LEVELS.map((l) => (
                   <button
                     key={l}
-                    className={n === 6 && m === 5 && state.x === levelLines(l) ? 'on' : ''}
-                    aria-pressed={n === 6 && m === 5 && state.x === levelLines(l)}
-                    title={t.level(l, levelLines(l))}
+                    className={state.level === l ? 'on' : ''}
+                    aria-pressed={state.level === l}
+                    title={t.level(l, levelBoard(l).x)}
                     onClick={() => {
                       setClick(null)
-                      setState({ ...state, n: 6, m: 5, x: levelLines(l), lines: [], played: [] })
+                      setState({ ...state, level: l, ...levelBoard(l), lines: [], played: [] })
                     }}
                   >
                     {l}
