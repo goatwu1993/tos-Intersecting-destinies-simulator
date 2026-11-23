@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LANGS, messages, type Lang } from './i18n.ts'
-import { clickLine, clickSegment, commit, complete, extend, removeRoute, type Draft, type Node } from './route.ts'
+import { autoExtend, clickLine, clickSegment, commit, complete, extend, removeRoute, type Draft, type Node } from './route.ts'
 import type { Expected } from './strategy.ts'
 import type { WorkerInput } from './strategy.worker.ts'
 import type { OddsInput } from './odds.worker.ts'
@@ -220,6 +220,8 @@ export default function App() {
     else setNotice('contradicts')
   }
   const editDraft = (next: Draft | null) => {
+    // after a step forward, take the steps that follow from it; an undo is left as is
+    if (next && (!click || next.path.length > click.path.length)) next = autoExtend(next, board, lines, blocked)
     if (next && complete(next, m)) {
       saveRoute(next.path)
       return setClick(null)
