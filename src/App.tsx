@@ -117,9 +117,10 @@ function NumberField(props: {
   )
 }
 
-// Every level is a 6 × 5 board; level l has l + 4 lines (5 … 9).
-const LEVELS = [1, 2, 3, 4, 5]
-const levelLines = (l: number) => l + 4
+// Every level is a 6 × 5 board; levels 1 … 5 have l + 4 lines (5 … 9),
+// and level 6 has the same setup as level 1.
+const LEVELS = [1, 2, 3, 4, 5, 6]
+const levelLines = (l: number) => (l === 6 ? 5 : l + 4)
 
 export default function App() {
   const { state, known, notice, loads, update: setState, setNotice } = useUrlState()
