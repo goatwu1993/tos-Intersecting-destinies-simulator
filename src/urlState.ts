@@ -34,9 +34,10 @@ export type State = {
 }
 
 // Every level is a 6 × 5 board; levels 1 … 5 have l + 4 lines (5 … 9),
-// and level 6 has the same setup as level 1.
-export const LEVELS = [1, 2, 3, 4, 5, 6]
-export const levelBoard = (l: number) => ({ n: 6, m: 5, x: l === 6 ? 5 : l + 4 })
+// and levels 6 and 7 have the same setup as levels 1 and 2.
+const LEVEL_LINES = [5, 6, 7, 8, 9, 5, 6]
+export const LEVELS = LEVEL_LINES.map((_, i) => i + 1)
+export const levelBoard = (l: number) => ({ n: 6, m: 5, x: LEVEL_LINES[l - 1] })
 const isLevel = (l: number | null): l is number => l !== null && LEVELS.includes(l)
 
 export const DEFAULT: State = { level: 1, n: 6, m: 5, x: 5, lines: [], played: [], dest: 0, lang: DEFAULT_LANG, strategy: 'gambler' }
